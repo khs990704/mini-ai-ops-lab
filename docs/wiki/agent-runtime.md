@@ -1,21 +1,21 @@
-# Agent Runtime
+# Agent 실행환경
 
-## Short Definition
+## 짧은 정의
 
-An Agent runtime is the environment that receives tool call requests, validates them, executes allowed tools, and records results.
+Agent 실행환경은 tool call 요청을 받고, 요청을 검증하며, 허용된 도구만 실행하고, 그 결과를 기록하는 환경이다.
 
-## Why It Matters In This Project
+## 이 프로젝트에서 중요한 이유
 
-NST mentions Agent execution environments, including tool calls, execution, isolation, and logs. This project demonstrates those ideas with a small allowlist-based tool runner.
+Agent가 제한 없이 도구를 실행하면 안정성과 보안 문제가 생길 수 있다. 이 프로젝트는 작은 allowlist 기반 도구 실행기를 통해 실행 통제, timeout, 감사 가능성을 구현한다.
 
-## Where It Appears In This Repository
+## 저장소에서 사용되는 위치
 
 - `configs/tools.yaml`
 - `src/tool_runner.py`
 - `src/audit_logger.py`
 - `logs/audit.jsonl`
 
-## Commands Or Code To Know
+## 알아둘 명령어나 코드
 
 ```bash
 python src/tool_runner.py --tool echo --input "hello"
@@ -23,18 +23,22 @@ python src/tool_runner.py --tool unknown
 tail -n 5 logs/audit.jsonl
 ```
 
-## Common Failure Cases
+## 흔한 실패 사례
 
-- Failure: unauthorized tool request
-- Symptom: unknown or dangerous tool name is requested
-- What to check: `configs/tools.yaml`, `logs/audit.jsonl`
-- Recovery: reject by default and record the attempt in the audit log
+- 실패: 허용되지 않은 도구 요청
+- 증상: 등록되지 않았거나 위험한 도구 이름이 요청됨
+- 확인할 것: `configs/tools.yaml`, `logs/audit.jsonl`
+- 복구 방법: 기본적으로 요청을 거부하고 시도 자체를 audit log에 기록함
 
-## Practical Explanation
+## 실용적인 이해
 
-Agent tool execution should be controlled because unrestricted tools can create reliability and security risks. In this project, the runner uses an allowlist, input handling, timeout, and audit logs so tool calls can be traced and limited.
+Agent 도구 실행은 일반 함수 호출처럼 보이더라도 외부 상태를 바꿀 수 있다. 이 프로젝트에서는 allowlist, 입력 처리, timeout, audit log를 사용해 실행 범위를 제한하고 호출 이력을 추적한다.
 
-## Related Docs
+## Codex Q&A 기록
 
-- [Project Plan](../project-plan.md)
-- [Failure Scenarios](../failure-scenarios.md)
+아직 기록된 질문이 없다.
+
+## 관련 문서
+
+- [프로젝트 계획](../project-plan.md)
+- [일별 작업 흐름](../daily-codex-workflow.md)

@@ -1,35 +1,40 @@
-# Topic Name
+# 주제 이름
 
-## Short Definition
+## 짧은 정의
 
-Write a short, plain-language definition.
+개념을 쉬운 말로 짧게 정의한다.
 
-## Why It Matters In This Project
+## 이 프로젝트에서 중요한 이유
 
-Explain why this concept matters for Mini AI Ops Lab.
+이 개념이 Mini AI Ops Lab에 필요한 이유를 설명한다.
 
-## Where It Appears In This Repository
+## 저장소에서 사용되는 위치
 
 - `path/to/file`
 
-## Commands Or Code To Know
+## 알아둘 명령어나 코드
 
 ```bash
 example command
 ```
 
-## Common Failure Cases
+## 흔한 실패 사례
 
-- Failure:
-- Symptom:
-- What to check:
-- Recovery:
+- 실패:
+- 증상:
+- 확인할 것:
+- 복구 방법:
 
-## Practical Explanation
+## 실용적인 이해
 
-Write 2-4 sentences that explain how to understand or use this concept in the project.
+프로젝트에서 이 개념을 어떻게 이해하고 사용해야 하는지 2~4문장으로 설명한다.
 
-## Related Docs
+## Codex Q&A 기록
 
-- [Project Plan](../project-plan.md)
-- [Daily Workflow](../daily-codex-workflow.md)
+- 질문:
+  답변:
+
+## 관련 문서
+
+- [프로젝트 계획](../project-plan.md)
+- [일별 작업 흐름](../daily-codex-workflow.md)

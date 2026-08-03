@@ -1,34 +1,38 @@
-# Python
+# Python이 생성하는 파일
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 
-# Virtual environments
+# 로컬 가상환경
 .venv/
 venv/
 
-# Local environment and secrets
+# 로컬 환경 설정과 비밀정보
 .env
 .env.*
 !.env.example
 
-# Generated logs and model artifacts
+# 실행 중 생성되는 운영 데이터
+# 실제 실행 결과는 제외하고 빈 디렉터리 구조만 저장소에 유지합니다.
 logs/*
 !logs/.gitkeep
 artifacts/*
 !artifacts/.gitkeep
 
-# Build and coverage output
+# 빌드 및 테스트 커버리지 결과
 build/
 dist/
 *.egg-info/
 .coverage
 htmlcov/
 
-# Editor and operating-system files
-.idea/
+# 편집기와 운영체제가 생성하는 파일
 .vscode/
+.idea/
 .DS_Store
 Thumbs.db
+
+# Agent용 Markdown 파일
+AGENT.md

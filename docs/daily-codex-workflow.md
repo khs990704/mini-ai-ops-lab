@@ -12,36 +12,64 @@ At the start of each session:
 
 1. Read `AGENTS.md`.
 2. Read `docs/project-plan.md`.
-3. Check `docs/daily-log.md`.
+3. Check `docs/work-logs/README.md` and the dated files under `docs/work-logs/`.
 4. Find the latest completed day.
 5. Prepare the next unfinished day plan, or the day explicitly requested by the user.
-6. Present the plan for user review before file edits.
-7. Start implementation only after explicit user approval.
-8. Keep the work small enough to finish, verify, and document in one session.
+6. Divide the day into small numbered steps that can each be implemented and verified independently.
+7. Present the full step plan for user review before file edits.
+8. Treat the user's initial approval as permission for Step 1 only.
 
-At the end of each session:
+For each implementation step:
 
-1. Run a useful verification command.
-2. Update the README or relevant docs.
-3. Update `docs/wiki/` when the day introduced or used a concept the user should learn.
-4. Append a daily log entry.
-5. State the next recommended task.
+1. Implement only the currently approved step.
+2. Run that step's useful verification command.
+3. Present changed files, code intent, verification results, problems, and remaining steps.
+4. Let the user inspect the work and ask questions.
+5. Stop and wait; do not begin the next step automatically.
+6. Continue only when the user explicitly says "진행" or gives equivalent approval.
+
+After the final implementation step:
+
+1. Present the complete result, answer remaining questions, and gather the user's reflection when available.
+2. Do not update `docs/wiki/` or create the work-log entry yet.
+3. Wait for explicit finalization approval such as "정리해줘" or "기록해줘".
+4. Categorize the implemented concepts and useful Q&A into the matching wiki pages.
+5. Create `docs/work-logs/YYYY-MM-DD-DayN.md` and update `docs/work-logs/README.md`.
+6. State the next recommended task.
 
 ## User Review Gate
 
 Before implementing a daily task, Codex must show a short plan:
 
 - day number and goal
-- files likely to be created or changed
-- verification commands to run
+- numbered implementation steps
+- files likely to be created or changed in each step
+- verification commands for each step
+- each reusable project command's purpose, side effects, and expected success evidence
+- user-run verification instructions when direct confirmation will be needed
 - wiki pages likely to be updated
-- expected daily-log entry topics
+- expected work-log entry topics
 
 Then Codex must wait for the user to approve, revise, or stop the plan.
 
-If the user says "진행", "승인", "좋아", "해줘", or gives equivalent approval, Codex can proceed.
+If the user says "진행", "승인", "좋아", "해줘", or gives equivalent approval, Codex can execute only the next pending step. One approval never covers multiple steps.
+
+After every step, Codex must report:
+
+- completed step and remaining steps
+- changed files
+- code intent and important comments
+- verification command and result
+- why each reusable project command was run, what it changed or inspected, and how success was recognized
+- exact user-run command, working directory, prerequisites, and expected result when direct verification is needed
+- problems or decisions
+- what the user should inspect before approving the next step
+
+Questions do not implicitly approve the next step. Codex answers them and stays at the review gate.
 
 If the user changes the scope, Codex must revise the plan and confirm the new scope before editing.
+
+Implementation approval and record-finalization approval are separate gates. Approval to implement does not authorize wiki or work-log updates. Those records are written only after the user has reviewed the completed work, finished the relevant Q&A, and explicitly asks to finalize or record it.
 
 ## Project Outcome
 
@@ -58,46 +86,71 @@ By the end of the plan, the repository should contain:
 - security and backup checklist
 - project-local technical wiki
 
-## Daily Log Rules
+## Work Log Rules
 
-The file `docs/daily-log.md` is the project diary. It should be updated every day.
+The directory `docs/work-logs/` is the project diary. `docs/work-logs/README.md` tracks the current status and links each dated entry.
+
+Create exactly one file per completed project day using this naming rule:
+
+```text
+docs/work-logs/YYYY-MM-DD-DayN.md
+```
+
+Example: `docs/work-logs/2026-08-03-Day1.md`.
 
 Each entry must use this format:
 
 ```markdown
-## Day N - YYYY-MM-DD
+# Day N - YYYY-MM-DD
 
-### Goal
+## 목표
 
-### Work Done
+## 완료한 작업
 
-### Commands Run
+## 단계별 진행과 검수
 
-### Verification Result
+## 코드 및 설정 의도
 
-### Problems Found
+## 실행한 명령과 목적
 
-### Fixes or Decisions
+## 검증 결과
 
-### Reflection
+## 직접 확인 방법
 
-### What I Learned
+## Codex Q&A
 
-### Wiki Updated
+## 발견한 문제
 
-### Next Step
+## 수정 또는 결정
+
+## 회고
+
+## 배운 점
+
+## 갱신한 위키
+
+## 다음 작업
 ```
 
 Rules:
 
+- Treat the entry as the user's project and learning record, not Codex's activity report.
+- Describe accomplishments from the user's perspective, with Codex represented only as assistance when attribution matters.
 - Keep each entry factual.
 - Include command outputs only when they matter.
 - Record failures instead of hiding them.
 - Include errors, confusing parts, and decisions made during troubleshooting.
-- `Reflection` should explain what went wrong, why it mattered, and what will be handled differently next time.
+- `회고` should reflect the user's actual questions, decisions, corrections, or stated experience. Do not invent emotions or experiences the user did not provide.
+- If no personal reflection was provided, use a neutral factual reflection or ask the user before finalization when their input would materially improve the record.
 - Explain technical decisions in plain language.
+- In `단계별 진행과 검수`, record each approved step, its verification, and the review outcome.
+- In `코드 및 설정 의도`, explain the purpose of each important file, function, setting, and non-obvious comment added that day.
+- In `실행한 명령과 목적`, record only commands the user can reuse to set up, run, verify, inspect, troubleshoot, recover, or operate the project. Explain why each was run, whether it changed state, what happened, and how success was recognized.
+- Omit Codex-only navigation, search, formatting, diff inspection, and one-off orchestration commands. If one reveals a project-relevant failure, summarize the failure and fix under `발견한 문제` or `검증 결과` without adding a command tutorial.
+- In `직접 확인 방법`, provide the project working directory, prerequisites, exact commands, expected outputs or files, and side effects. Write `해당 없음` only when no direct user check is useful.
 - If work is partial, mark it clearly.
 - In `Wiki Updated`, list wiki pages created or changed. Write `None` only if no project-relevant concept was introduced.
+- Do not create the entry until user review and Q&A are complete and the user explicitly approves finalization.
 
 ## Technical Wiki Workflow
 
@@ -105,10 +158,13 @@ The project-local technical wiki lives in `docs/wiki/`.
 
 Use the wiki to teach the user concepts as they become necessary for the project. Do not wait until the end of the project to write theory notes.
 
-Daily rule:
+Finalization rule:
 
+- Wait until the user has reviewed all implemented work and completed their questions.
+- Codex chooses the most appropriate category page for each technical concept and useful Q&A.
 - If the day introduces a concept, create or update the matching wiki page.
-- If the day only applies a concept already documented, add a short project-specific note to the existing page.
+- If the day only applies a concept already documented, add a short project-specific note or Q&A to the existing page.
+- If no existing category fits, create a focused new page and add it to `docs/wiki/README.md`.
 - If the day is mostly documentation or cleanup, wiki updates are optional.
 
 Initial wiki topics:
@@ -325,7 +381,7 @@ Tasks:
 
 - Clean README.
 - Add architecture overview.
-- Update daily log.
+- Update the work-log index and dated entry after user finalization approval.
 - Create `docs/architecture.md`.
 - Write what each component does.
 
@@ -338,7 +394,7 @@ Completion Criteria:
 
 - README has a clear overview.
 - Architecture doc exists.
-- Week 1 daily logs are complete.
+- Week 1 work logs are complete.
 
 ## Day 8: Config-Based Training
 
@@ -650,7 +706,7 @@ Tasks:
 - Remove accidental large files or secrets.
 - Check README links.
 - Check docs completeness.
-- Add final daily log.
+- Add the final dated work log after user review.
 
 Completion Criteria:
 
@@ -660,43 +716,49 @@ Completion Criteria:
 - Technical wiki is coherent.
 - The project is ready for continued use or later application-material preparation.
 
-## Daily Log Template
+## Work Log Template
 
-Create `docs/daily-log.md` with this content when starting Day 1:
+Create one `docs/work-logs/YYYY-MM-DD-DayN.md` file with this content only after the user approves record finalization:
 
 ```markdown
-# Daily Log
+# Day N - YYYY-MM-DD
 
-## Project Goal
+## 목표
 
-Mini AI Ops Lab은 학습 작업 관리, 실험 기록, Agent 실행환경, 로그, 장애 대응, 보안/백업 문서를 갖춘 작은 AI 운영 시스템을 만드는 프로젝트다.
+## 완료한 작업
 
-## Day 1 - YYYY-MM-DD
+## 단계별 진행과 검수
 
-### Goal
+## 코드 및 설정 의도
 
-### Work Done
+## 실행한 명령과 목적
 
-### Commands Run
+## 검증 결과
 
-### Verification Result
+## 직접 확인 방법
 
-### Problems Found
+## Codex Q&A
 
-### Fixes or Decisions
+## 발견한 문제
 
-### What I Learned
+## 수정 또는 결정
 
-### Wiki Updated
+## 회고
 
-### Next Step
+## 배운 점
+
+## 갱신한 위키
+
+## 다음 작업
 ```
 
 ## Codex Response Rule
 
-When Codex finishes a daily task, the final response should include:
+Before record finalization, Codex should report the implementation for user review and invite questions. After the user approves finalization, the completion response should include:
 
 - what was implemented
+- the outcome of each reviewed implementation step
+- the intent of important code and comments
 - what was verified
 - which files changed
 - what the user should understand technically

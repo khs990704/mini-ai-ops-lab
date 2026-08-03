@@ -1,23 +1,23 @@
-# Security And Backup
+# 보안과 백업
 
-## Short Definition
+## 짧은 정의
 
-Security controls who can access or execute what. Backup and recovery ensure that important data can be restored after loss or failure.
+보안은 누가 무엇에 접근하거나 무엇을 실행할 수 있는지 통제하는 일이다. 백업과 복구는 데이터가 사라지거나 장애가 발생해도 중요한 정보를 다시 사용할 수 있게 하는 과정이다.
 
-## Why It Matters In This Project
+## 이 프로젝트에서 중요한 이유
 
-The NST role includes backup, recovery, access audit records, and security operations. This project should show that logs, artifacts, configs, and secrets are handled deliberately.
+로그, artifact, config, 비밀정보는 각각 다른 보관 및 접근 규칙이 필요하다. 이 프로젝트는 처음부터 비밀정보 분리, 도구 실행 통제, audit log, artifact와 로그의 백업을 고려한다.
 
-## Where It Appears In This Repository
+## 저장소에서 사용되는 위치
 
 - `.env.example`
 - `.gitignore`
 - `configs/`
 - `logs/audit.jsonl`
 - `artifacts/`
-- `docs/security-backup-checklist.md`
+- 향후 작성할 `docs/security-backup-checklist.md`
 
-## Commands Or Code To Know
+## 알아둘 명령어나 코드
 
 ```bash
 ls -la
@@ -25,18 +25,22 @@ find artifacts -maxdepth 2 -type f
 du -sh logs artifacts
 ```
 
-## Common Failure Cases
+## 흔한 실패 사례
 
-- Failure: secret accidentally committed
-- Symptom: API key or password appears in Git history or logs
-- What to check: `.gitignore`, `.env`, logs, repository diff
-- Recovery: remove the secret, rotate it, and document the prevention rule
+- 실패: 비밀정보가 실수로 Git에 커밋됨
+- 증상: API key 또는 password가 Git history나 로그에 나타남
+- 확인할 것: `.gitignore`, `.env`, 로그, 저장소 diff
+- 복구 방법: 비밀정보를 제거하고 즉시 교체한 뒤 재발 방지 규칙을 문서화함
 
-## Practical Explanation
+## 실용적인 이해
 
-Operations work should consider security and recovery from the start. In this project, secrets are separated from code, audit logs record tool calls, and artifact/log backup rules are documented so the system can be reviewed and recovered.
+운영 시스템은 처음부터 보안과 복구 가능성을 고려해야 한다. 이 프로젝트는 비밀정보를 코드와 분리하고, 도구 호출을 audit log에 기록하며, artifact와 로그의 백업 규칙을 문서화해 검토와 복구가 가능하게 한다.
 
-## Related Docs
+## Codex Q&A 기록
 
-- [Security Backup Checklist](../security-backup-checklist.md)
-- [Runbook](../runbook.md)
+아직 기록된 질문이 없다.
+
+## 관련 문서
+
+- [프로젝트 계획](../project-plan.md)
+- [일별 작업 흐름](../daily-codex-workflow.md)

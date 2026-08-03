@@ -1,29 +1,32 @@
-# Technical Wiki
+# 기술 위키
 
-This wiki explains the concepts needed to build and operate Mini AI Ops Lab.
+이 위키는 Mini AI Ops Lab을 만들고 운영하는 데 필요한 기술 개념을 설명한다.
 
-The purpose is practical project learning. Each page should connect a concept to this repository and the actual implementation.
+일반 이론을 넓게 다루기보다 실제 구현과 연결된 내용을 기록하여 프로젝트를 진행하면서 필요한 개념을 학습하는 것이 목적이다.
 
-## Index
+## 카테고리
 
 - [MLOps](mlops.md)
-- [Linux Operations](linux-ops.md)
+- [Linux 운영](linux-ops.md)
 - [Docker](docker.md)
-- [GPU Infrastructure](gpu-infra.md)
-- [Agent Runtime](agent-runtime.md)
-- [Logging And Monitoring](logging-monitoring.md)
-- [Security And Backup](security-backup.md)
+- [GPU 인프라](gpu-infra.md)
+- [Agent 실행환경](agent-runtime.md)
+- [로깅과 모니터링](logging-monitoring.md)
+- [보안과 백업](security-backup.md)
 
-## Writing Rules
+## 작성 규칙
 
-- Keep explanations short and practical.
-- Explain concepts when they are used in the project.
-- Prefer repository examples over general theory.
-- Include common failure cases.
-- Include a practical explanation.
-- Use relative Markdown links.
-- Do not rely on Obsidian wikilinks.
+- 설명은 짧고 실용적으로 작성한다.
+- 프로젝트에서 실제로 사용한 시점에 개념을 설명한다.
+- 일반 이론보다 이 저장소의 예시를 우선한다.
+- 흔한 실패 사례와 실용적인 설명을 포함한다.
+- 사용자가 구현 결과를 검수하고 관련 Q&A를 마친 뒤 기록을 승인할 때 갱신한다.
+- Codex가 기술 개념과 유용한 질문을 가장 적절한 카테고리에 분류한다.
+- 기존 카테고리가 맞으면 해당 문서에 추가하고, 맞는 문서가 없을 때만 새 문서를 만들어 이 인덱스에 연결한다.
+- 유용한 질문은 선택한 문서의 `Codex Q&A 기록`에 보존한다.
+- 상대 경로 Markdown 링크를 사용하고 Obsidian wikilink에 의존하지 않는다.
+- 설명은 한글로 작성하되 명령어, 파일 경로, 코드 식별자, 라이브러리명은 필요한 경우 원문을 유지한다.
 
-## Page Template
+## 문서 템플릿
 
-Use [template.md](template.md) for new pages.
+새 카테고리 문서는 [템플릿](template.md)을 사용한다.

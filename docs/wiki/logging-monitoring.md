@@ -1,14 +1,14 @@
-# Logging And Monitoring
+# 로깅과 모니터링
 
-## Short Definition
+## 짧은 정의
 
-Logging records events that happened. Monitoring tracks system or application state over time so operators can detect problems.
+로깅은 발생한 사건을 기록하는 일이다. 모니터링은 시스템이나 애플리케이션 상태를 시간에 따라 관찰하여 문제를 발견하는 일이다.
 
-## Why It Matters In This Project
+## 이 프로젝트에서 중요한 이유
 
-This project starts with structured logs because they are the simplest operational evidence. Logs show which job ran, whether it succeeded, how long it took, what metric it produced, and what failed.
+이 프로젝트는 가장 단순한 운영 증거인 structured log부터 시작한다. 로그를 통해 어떤 작업이 실행됐는지, 성공했는지, 얼마나 걸렸는지, 어떤 metric이 생성됐는지, 무엇이 실패했는지 확인할 수 있다.
 
-## Where It Appears In This Repository
+## 저장소에서 사용되는 위치
 
 - `logs/runs.jsonl`
 - `logs/audit.jsonl`
@@ -16,7 +16,7 @@ This project starts with structured logs because they are the simplest operation
 - `src/run_job.py`
 - `src/tool_runner.py`
 
-## Commands Or Code To Know
+## 알아둘 명령어나 코드
 
 ```bash
 tail -n 5 logs/runs.jsonl
@@ -24,18 +24,25 @@ tail -n 5 logs/audit.jsonl
 wc -l logs/runs.jsonl
 ```
 
-## Common Failure Cases
+## 흔한 실패 사례
 
-- Failure: logs are unstructured or missing fields
-- Symptom: a failure happened but the cause cannot be traced
-- What to check: log schema, exception handling, run id consistency
-- Recovery: record structured fields such as status, timestamps, duration, error, and artifact path
+- 실패: 로그가 구조화되지 않았거나 필요한 필드가 없음
+- 증상: 장애가 발생했지만 원인을 추적할 수 없음
+- 확인할 것: 로그 schema, 예외 처리, run ID의 일관성
+- 복구 방법: 상태, 시각, 실행 시간, 오류, artifact 경로를 일관된 필드로 기록함
 
-## Practical Explanation
+## 실용적인 이해
 
-Logs are the first tool for understanding operational failures. In this project, run logs and audit logs are written as JSONL so each training job and tool call can be inspected and traced.
+로그는 운영 장애를 이해할 때 가장 먼저 확인하는 자료다. 이 프로젝트는 학습 작업과 도구 호출을 한 건씩 추적할 수 있도록 run log와 audit log를 JSONL 형식으로 기록한다.
 
-## Related Docs
+`logs/`는 실행 과정에 관한 기록을 보관한다. 반면 `artifacts/`는 실행이 만든 모델과 같은 실제 결과물을 보관한다.
 
-- [Runbook](../runbook.md)
-- [Failure Scenarios](../failure-scenarios.md)
+## Codex Q&A 기록
+
+아직 이 카테고리에 기록할 별도의 질문은 없다. 프로젝트 디렉터리 전체 역할에 관한 질문은 [MLOps](mlops.md)에 정리되어 있다.
+
+## 관련 문서
+
+- [프로젝트 계획](../project-plan.md)
+- [일별 작업 흐름](../daily-codex-workflow.md)
+- [MLOps](mlops.md)

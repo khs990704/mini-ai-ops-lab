@@ -36,7 +36,7 @@ Mini AI Ops Lab은 AI 작업을 운영하는 방법을 배우기 위한 작고 �
 
 ## 시작 방법
 
-Day 1에서는 프로젝트 기본 구조를 준비했다. 실제 학습 명령은 Day 2에서 추가한다.
+Day 1에서는 프로젝트 기본 구조를 준비했고, Day 2에서는 명령줄에서 실행할 수 있는 기본 학습 작업을 추가했다.
 
 ```bash
 python3 -m venv .venv
@@ -48,7 +48,21 @@ python -m pip install -r requirements.txt
 
 ## 학습 작업 관리
 
-학습 코드는 `src/` 아래에 작성한다. 각 실행에는 고유한 run ID와 명확한 성공 또는 실패 상태를 부여한다.
+기본 학습 작업은 scikit-learn 내장 Iris dataset을 학습용 80%, 검증용 20%로 나눈 뒤 `LogisticRegression` 모델을 학습하고 accuracy를 계산한다.
+
+프로젝트 root에서 다음 명령을 실행한다.
+
+```bash
+python src/train_job.py
+```
+
+정상 실행되면 다음과 같은 JSON 한 줄이 출력된다.
+
+```json
+{"accuracy": 0.9666666666666667, "test_samples": 30, "train_samples": 120}
+```
+
+현재 단계에서는 CPU와 memory에서만 모델을 학습하며 파일을 생성하지 않는다. 고유한 run ID, 모델 artifact 저장, 성공·실패 상태와 run log는 이후 작업일에 추가한다.
 
 ## 실험 추적
 

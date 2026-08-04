@@ -36,13 +36,36 @@ src/의 코드 실행
 └── artifacts/에 실행 결과물
 ```
 
+### Day 2 기본 학습 작업
+
+`src/train_job.py`는 다음 순서로 동작한다.
+
+```text
+Iris dataset 로딩
+       ↓
+학습용 120개와 검증용 30개로 분리
+       ↓
+LogisticRegression 모델 학습
+       ↓
+검증 데이터 예측
+       ↓
+accuracy와 sample 수를 JSON으로 출력
+```
+
+- training job: 데이터 준비, 모델 학습, 평가를 하나의 실행 단위로 묶은 작업
+- 학습 데이터: 모델이 분류 기준을 배우는 데 사용하는 데이터
+- 검증 데이터: 학습에 사용하지 않고 학습된 모델을 평가하는 데이터
+- metric: 모델 결과를 숫자로 나타낸 값이며, 현재는 정답을 맞힌 비율인 accuracy를 사용함
+- `random_state=42`: 실행할 때마다 같은 방식으로 데이터가 나뉘게 하여 결과를 재현할 수 있게 함
+- `stratify`: 세 Iris 품종의 비율이 학습·검증 데이터에서 비슷하게 유지되게 함
+
 ## 알아둘 명령어나 코드
 
 ```bash
-python src/run_job.py --config configs/train.yaml
-tail -n 3 logs/runs.jsonl
-find artifacts -maxdepth 2 -type f
+python src/train_job.py
 ```
+
+이 명령은 CPU와 memory에서 모델을 학습하고 metrics를 JSON으로 출력한다. Day 2에는 아직 log나 artifact 파일을 생성하지 않는다.
 
 ## 흔한 실패 사례
 
@@ -50,10 +73,16 @@ find artifacts -maxdepth 2 -type f
 - 증상: 과거 metric은 있지만 사용한 config 또는 artifact 경로가 없음
 - 확인할 것: `logs/runs.jsonl`, `configs/train.yaml`, `artifacts/`
 - 복구 방법: 각 실행의 config, metric, artifact 경로를 함께 저장함
+- 실패: `python src/train_job.py`를 실행했지만 아무 출력이 없음
+- 증상: 오류 없이 바로 종료되지만 terminal에 metrics가 나타나지 않음
+- 확인할 것: `main()`과 `if __name__ == "__main__":` 진입점이 있는지 확인
+- 복구 방법: 직접 실행할 때 `main()`이 호출되도록 진입점을 연결함
 
 ## 실용적인 이해
 
 팀이 모델 결과의 생성 과정을 추적할 수 없다면 그 결과는 운영에 사용하기 어렵다. 이 프로젝트에서는 학습마다 파라미터, metric, 상태, artifact 경로를 연결하여 결과를 비교하고 재현한다.
+
+Python 파일에 함수를 정의하는 것만으로는 함수가 실행되지 않는다. `python src/train_job.py`처럼 파일을 직접 실행했을 때 학습을 시작하려면 `if __name__ == "__main__":` 진입점에서 `main()`을 호출해야 한다. Day 2에서는 이 진입점이 `train_model()`을 실행하고 metrics를 JSON 한 줄로 출력한다.
 
 저장소는 소스 파일과 실행 중 생성되는 데이터를 분리한다. `logs/`와 `artifacts/`는 프로젝트 구조에 필요하지만 내부 실행 결과는 Git에 커밋하지 않는다. Git은 빈 디렉터리를 추적하지 않으므로 `.gitkeep` placeholder를 두고, `.gitignore`로 실제 생성 파일을 제외한다. `.gitkeep`은 Git의 공식 기능이 아니라 관례적인 파일 이름이다.
 
@@ -63,6 +92,8 @@ find artifacts -maxdepth 2 -type f
   답변: Git은 빈 디렉터리를 추적하지 않는다. `.gitkeep` placeholder는 clone 후에도 `logs/`와 `artifacts/` 구조가 존재하게 하며, 실제 로그와 모델 파일은 `.gitignore`로 제외할 수 있게 한다.
 - 질문: `configs/`, `src/`, `logs/`, `artifacts/`는 각각 어떤 용도인가?
   답변: `configs/`는 실행 설정, `src/`는 실행 코드, `logs/`는 실행 과정과 상태 기록, `artifacts/`는 학습으로 생성된 모델과 결과물을 담당한다. 설정과 코드가 실행되면 로그와 artifact가 만들어지는 흐름이다.
+- 질문: `python src/train_job.py`를 실행했는데 왜 출력되는 것이 없는가?
+  답변: 당시에는 함수만 정의되어 있고 함수를 호출하는 CLI 진입점이 없었다. `main()`과 `if __name__ == "__main__":`를 추가한 뒤 같은 명령으로 학습과 JSON 출력이 실행된다.
 
 ## 관련 문서
 

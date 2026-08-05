@@ -1,4 +1,4 @@
-"""Iris 분류 모델을 학습하고 검증 metrics를 JSON으로 출력한다."""
+"""Iris 분류 모델을 학습하고 metrics와 artifact 경로를 JSON으로 출력한다."""
 
 import json
 
@@ -6,6 +6,12 @@ from sklearn.datasets import load_iris
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
+
+# 파일 직접 실행과 `src.train_job` module import에서 모두 storage를 찾도록 한다.
+if __package__:
+    from .storage import generate_run_id, save_model
+else:
+    from storage import generate_run_id, save_model
 
 
 TEST_SIZE = 0.2
@@ -47,9 +53,16 @@ def train_model():
 
 
 def main():
-    """명령줄에서 학습 작업을 실행하고 metrics를 JSON 한 줄로 출력한다."""
-    _, metrics = train_model()
-    print(json.dumps(metrics, sort_keys=True))
+    """학습 실행을 식별하고 model 저장 결과를 JSON 한 줄로 출력한다."""
+    run_id = generate_run_id()
+    model, metrics = train_model()
+    artifact_path = save_model(model, run_id)
+    result = {
+        "run_id": run_id,
+        "metrics": metrics,
+        "artifact_path": str(artifact_path),
+    }
+    print(json.dumps(result, sort_keys=True))
 
 
 if __name__ == "__main__":

@@ -59,13 +59,36 @@ accuracy와 sample 수를 JSON으로 출력
 - `random_state=42`: 실행할 때마다 같은 방식으로 데이터가 나뉘게 하여 결과를 재현할 수 있게 함
 - `stratify`: 세 Iris 품종의 비율이 학습·검증 데이터에서 비슷하게 유지되게 함
 
+### Day 3 run ID와 model artifact
+
+Day 3에서는 학습 결과를 memory에서만 사용하지 않고 실행별 파일로 저장한다.
+
+```text
+run ID 생성
+    ↓
+model 학습과 metric 계산
+    ↓
+artifacts/{run_id}/ 디렉터리 생성
+    ↓
+model.pkl 저장
+    ↓
+run ID, metrics, artifact 경로를 JSON으로 출력
+```
+
+- run ID: 하나의 학습 실행을 다른 실행과 구분하는 고유 식별자
+- model artifact: 학습 작업이 만든 model 파일처럼 실행 후 보존해야 하는 결과물
+- 실행별 경로: 각 model을 별도 디렉터리에 저장하여 이전 실행 결과를 덮어쓰지 않는 구조
+- 현재 run ID: UTC 생성 시각과 짧은 UUID suffix를 조합하여 실행 시점 확인과 충돌 방지를 함께 고려함
+- 현재 model 형식: Python pickle 형식의 `model.pkl`
+
 ## 알아둘 명령어나 코드
 
 ```bash
 python src/train_job.py
+find artifacts -maxdepth 2 -type f -name 'model.pkl' -printf '%p %s bytes\n' | sort
 ```
 
-이 명령은 CPU와 memory에서 모델을 학습하고 metrics를 JSON으로 출력한다. Day 2에는 아직 log나 artifact 파일을 생성하지 않는다.
+첫 번째 명령은 모델을 학습하고 `artifacts/{run_id}/model.pkl`을 생성한 뒤 metrics와 경로를 JSON으로 출력한다. 두 번째 명령은 저장된 model 경로와 크기를 읽기만 한다. run log는 이후 작업일에 추가한다.
 
 ## 흔한 실패 사례
 
@@ -77,12 +100,18 @@ python src/train_job.py
 - 증상: 오류 없이 바로 종료되지만 terminal에 metrics가 나타나지 않음
 - 확인할 것: `main()`과 `if __name__ == "__main__":` 진입점이 있는지 확인
 - 복구 방법: 직접 실행할 때 `main()`이 호출되도록 진입점을 연결함
+- 실패: 기존 model artifact가 덮어써짐
+- 증상: 이전 실행의 model 파일이 사라지고 최신 결과만 남음
+- 확인할 것: run ID가 매번 새로 생성되는지, `artifacts/{run_id}/` 구조인지 확인
+- 복구 방법: 실행별 고유 run ID 디렉터리를 만들고 기존 디렉터리가 있으면 저장을 거부함
 
 ## 실용적인 이해
 
 팀이 모델 결과의 생성 과정을 추적할 수 없다면 그 결과는 운영에 사용하기 어렵다. 이 프로젝트에서는 학습마다 파라미터, metric, 상태, artifact 경로를 연결하여 결과를 비교하고 재현한다.
 
 Python 파일에 함수를 정의하는 것만으로는 함수가 실행되지 않는다. `python src/train_job.py`처럼 파일을 직접 실행했을 때 학습을 시작하려면 `if __name__ == "__main__":` 진입점에서 `main()`을 호출해야 한다. Day 2에서는 이 진입점이 `train_model()`을 실행하고 metrics를 JSON 한 줄로 출력한다.
+
+run ID는 model 파일 이름만으로 알 수 없는 실행 단위를 표현한다. 현재는 run ID와 artifact 경로만 연결했으며, 이후 같은 run ID를 run log와 config에도 기록하면 어떤 설정과 metric이 해당 model을 만들었는지 추적할 수 있다.
 
 저장소는 소스 파일과 실행 중 생성되는 데이터를 분리한다. `logs/`와 `artifacts/`는 프로젝트 구조에 필요하지만 내부 실행 결과는 Git에 커밋하지 않는다. Git은 빈 디렉터리를 추적하지 않으므로 `.gitkeep` placeholder를 두고, `.gitignore`로 실제 생성 파일을 제외한다. `.gitkeep`은 Git의 공식 기능이 아니라 관례적인 파일 이름이다.
 

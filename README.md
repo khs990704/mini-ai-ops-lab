@@ -59,10 +59,26 @@ python src/train_job.py
 정상 실행되면 다음과 같은 JSON 한 줄이 출력된다.
 
 ```json
-{"accuracy": 0.9666666666666667, "test_samples": 30, "train_samples": 120}
+{"artifact_path": "artifacts/20260805T043140293097Z-eed6e816/model.pkl", "metrics": {"accuracy": 0.9666666666666667, "test_samples": 30, "train_samples": 120}, "run_id": "20260805T043140293097Z-eed6e816"}
 ```
 
-현재 단계에서는 CPU와 memory에서만 모델을 학습하며 파일을 생성하지 않는다. 고유한 run ID, 모델 artifact 저장, 성공·실패 상태와 run log는 이후 작업일에 추가한다.
+run ID는 실행할 때마다 달라진다. 현재는 성공·실패 상태와 run log를 기록하지 않으며 이후 작업일에 추가한다.
+
+## 모델 Artifact 저장
+
+각 학습 실행은 UTC 생성 시각과 UUID suffix를 조합한 run ID를 사용한다. 학습된 model은 다른 실행 결과를 덮어쓰지 않도록 다음 경로에 저장한다.
+
+```text
+artifacts/{run_id}/model.pkl
+```
+
+저장된 model 파일은 다음 명령으로 확인한다.
+
+```bash
+find artifacts -maxdepth 2 -type f -name 'model.pkl' -printf '%p %s bytes\n' | sort
+```
+
+이 명령은 파일을 변경하지 않고 artifact 경로와 크기를 출력한다. `artifacts/`의 실행 결과는 `.gitignore`에 따라 Git에서 제외된다. `model.pkl`은 Python pickle 형식이므로 신뢰할 수 없는 외부 파일을 불러오지 않는다.
 
 ## 실험 추적
 

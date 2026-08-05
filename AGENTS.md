@@ -86,7 +86,7 @@ When the user asks to work on this project, Codex should:
 12. After the final step, gather any remaining Q&A and the user's reflection when available, then wait for explicit approval to finalize records.
 13. After finalization approval, update relevant docs and categorize technical concepts or Q&A into the matching files under `docs/wiki/`.
 14. Create one work-log file under `docs/work-logs/` using `YYYY-MM-DD-DayN.md`.
-15. Update `docs/work-logs/README.md` and summarize what changed, what was verified, and what to do next.
+15. Update `docs/work-logs/README.md` and summarize what changed, what was verified, what to do next, and a recommended Git commit message for the finalized day.
 
 If `docs/work-logs/` does not exist, create it with an index at `docs/work-logs/README.md` and use the template in `docs/daily-codex-workflow.md` for each dated entry.
 
@@ -203,6 +203,12 @@ Work-log ownership and voice rules:
 - Keep `Codex Q&A` as the explicit place to distinguish the user's question from Codex's answer.
 - Base `회고` on the user's actual questions, decisions, corrections, and stated experience. Never invent the user's feelings or claim a personal experience they did not express.
 - If a personal reflection would add value but the user has not provided one, ask for it before finalization or write a neutral factual reflection about the workflow and decisions.
+
+Git commit handoff rules:
+
+- After the wiki and work log are finalized, recommend one concise Git commit message that summarizes the completed day's actual changes.
+- Prefer the repository's existing commit style and use a conventional prefix such as `feat:`, `fix:`, `docs:`, or `chore:` when appropriate.
+- Present the message as a copyable command, but do not create the commit unless the user explicitly asks or approves it.
 
 Recommended structure:
 

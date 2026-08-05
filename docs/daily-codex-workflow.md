@@ -35,7 +35,8 @@ After the final implementation step:
 3. Wait for explicit finalization approval such as "정리해줘" or "기록해줘".
 4. Categorize the implemented concepts and useful Q&A into the matching wiki pages.
 5. Create `docs/work-logs/YYYY-MM-DD-DayN.md` and update `docs/work-logs/README.md`.
-6. State the next recommended task.
+6. Recommend a concise Git commit message for the finalized changes without creating the commit automatically.
+7. State the next recommended task.
 
 ## User Review Gate
 
@@ -762,6 +763,7 @@ Before record finalization, Codex should report the implementation for user revi
 - what was verified
 - which files changed
 - what the user should understand technically
+- a recommended Git commit message
 - the next recommended day task
 
 Keep the response concise and practical.

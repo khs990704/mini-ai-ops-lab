@@ -50,7 +50,7 @@ python -m pip install -r requirements.txt
 
 기본 학습 작업은 scikit-learn 내장 Iris dataset을 학습용 80%, 검증용 20%로 나눈 뒤 `LogisticRegression` 모델을 학습하고 accuracy를 계산한다.
 
-프로젝트 root에서 다음 명령을 실행한다.
+학습과 artifact 저장만 직접 확인하려면 프로젝트 root에서 다음 명령을 실행한다.
 
 ```bash
 python src/train_job.py
@@ -62,7 +62,7 @@ python src/train_job.py
 {"artifact_path": "artifacts/20260805T043140293097Z-eed6e816/model.pkl", "metrics": {"accuracy": 0.9666666666666667, "test_samples": 30, "train_samples": 120}, "run_id": "20260805T043140293097Z-eed6e816"}
 ```
 
-run ID는 실행할 때마다 달라진다. 현재는 성공·실패 상태와 run log를 기록하지 않으며 이후 작업일에 추가한다.
+run ID는 실행할 때마다 달라진다. 실제 운영 흐름에서는 아래의 `src/run_job.py`를 사용해 학습 결과를 run log와 함께 기록한다.
 
 ## 모델 Artifact 저장
 
@@ -92,8 +92,24 @@ find artifacts -maxdepth 2 -type f -name 'model.pkl' -printf '%p %s bytes\n' | s
 
 실행 중 생성되는 운영 기록은 JSON Lines(JSONL) 형식을 사용한다.
 
-- `logs/runs.jsonl`: 학습 실행과 실패 기록
+- `logs/runs.jsonl`: 학습 실행 기록
 - `logs/audit.jsonl`: Agent 도구 호출 기록
+
+성공한 학습 실행을 기록하려면 프로젝트 root에서 다음 명령을 실행한다.
+
+```bash
+python src/run_job.py
+```
+
+이 명령은 새로운 model artifact를 생성하고 `logs/runs.jsonl` 끝에 실행 기록 한 줄을 추가한다. 기록에는 `run_id`, `status`, `started_at`, `ended_at`, `duration_seconds`, `metrics`, `artifact_path`가 포함된다. 현재는 성공한 실행만 기록하며 실패 기록은 이후 작업에서 추가한다.
+
+최근 실행 기록은 다음 명령으로 확인한다.
+
+```bash
+tail -n 3 logs/runs.jsonl
+```
+
+`tail` 명령은 로그를 변경하지 않고 마지막 세 줄을 출력한다. JSONL은 한 실행을 독립된 JSON 한 줄로 저장하므로 기존 전체 내용을 다시 쓰지 않고 새 기록을 추가할 수 있다.
 
 생성된 로그 파일은 Git에서 제외한다. 빈 디렉터리는 `.gitkeep` placeholder를 사용해 저장소에 유지한다.
 

@@ -12,6 +12,7 @@ Linux 운영은 Linux 시스템에서 process, 파일, 로그, disk 사용량, �
 
 - `logs/`
 - `artifacts/`
+- `src/run_job.py`
 - 향후 작성할 `docs/runbook.md`
 - 검증에 사용하는 shell 명령
 
@@ -25,6 +26,14 @@ tail -n 5 logs/runs.jsonl
 du -sh logs artifacts
 ```
 
+Python에서 로그 파일의 부모 디렉터리를 준비하는 코드는 다음과 같다.
+
+```python
+log_path.parent.mkdir(parents=True, exist_ok=True)
+```
+
+`log_path.parent`는 파일 경로에서 부모 디렉터리를 선택한다. `parents=True`는 필요한 상위 디렉터리도 만들고, `exist_ok=True`는 디렉터리가 이미 있을 때 오류 없이 계속하게 한다.
+
 ## 흔한 실패 사례
 
 - 실패: 출력 파일을 찾을 수 없음
@@ -36,9 +45,12 @@ du -sh logs artifacts
 
 운영 작업에서는 코드만 읽는 것이 아니라 실제 실행환경에서 관찰 가능한 증거를 확인해야 한다. 이 프로젝트는 Linux 명령을 사용해 로그, artifact, 경로, 파일 크기를 확인하고 장애 원인을 좁힌다.
 
+`Path("logs/runs.jsonl")`은 현재 작업 디렉터리를 기준으로 해석되는 상대 경로다. 따라서 프로젝트가 기대하는 `logs/`에 기록하려면 프로젝트 root에서 명령을 실행한다. 부모 디렉터리를 먼저 만든 뒤 파일을 append mode로 열면 새 환경에서도 로그 파일을 만들고 기존 기록은 보존할 수 있다.
+
 ## Codex Q&A 기록
 
-아직 기록된 질문이 없다.
+- 질문: `log_path.parent.mkdir(parents=True, exist_ok=True)`는 어떻게 동작하는가?
+  답변: `runs.jsonl` 파일 자체가 아니라 부모인 `logs/`를 준비한다. 중간 상위 경로가 없으면 함께 만들고 이미 디렉터리가 존재하면 그대로 사용한다. 그다음 파일을 append mode로 열어 기존 로그 뒤에 새 기록을 추가한다.
 
 ## 관련 문서
 

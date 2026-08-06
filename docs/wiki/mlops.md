@@ -81,14 +81,27 @@ run ID, metrics, artifact 경로를 JSON으로 출력
 - 현재 run ID: UTC 생성 시각과 짧은 UUID suffix를 조합하여 실행 시점 확인과 충돌 방지를 함께 고려함
 - 현재 model 형식: Python pickle 형식의 `model.pkl`
 
+### Day 4 run log 연결
+
+Day 4에서는 같은 run ID를 성공 run log에도 기록하여 실행 정보와 model 결과물을 연결한다.
+
+```text
+logs/runs.jsonl의 run_id와 artifact_path
+                  ↓
+artifacts/{run_id}/model.pkl
+```
+
+`model.pkl`은 학습된 실제 결과물이고, `runs.jsonl`은 그 결과물이 언제 생성됐고 metric과 실행 시간이 어땠는지를 설명하는 운영 기록이다.
+
 ## 알아둘 명령어나 코드
 
 ```bash
 python src/train_job.py
+python src/run_job.py
 find artifacts -maxdepth 2 -type f -name 'model.pkl' -printf '%p %s bytes\n' | sort
 ```
 
-첫 번째 명령은 모델을 학습하고 `artifacts/{run_id}/model.pkl`을 생성한 뒤 metrics와 경로를 JSON으로 출력한다. 두 번째 명령은 저장된 model 경로와 크기를 읽기만 한다. run log는 이후 작업일에 추가한다.
+첫 번째 명령은 학습과 artifact 저장을 직접 실행한다. 두 번째 명령은 같은 작업을 실행하고 성공 결과를 `logs/runs.jsonl`에도 추가하는 운영 진입점이다. 세 번째 명령은 저장된 model 경로와 크기를 읽기만 한다.
 
 ## 흔한 실패 사례
 
@@ -111,7 +124,7 @@ find artifacts -maxdepth 2 -type f -name 'model.pkl' -printf '%p %s bytes\n' | s
 
 Python 파일에 함수를 정의하는 것만으로는 함수가 실행되지 않는다. `python src/train_job.py`처럼 파일을 직접 실행했을 때 학습을 시작하려면 `if __name__ == "__main__":` 진입점에서 `main()`을 호출해야 한다. Day 2에서는 이 진입점이 `train_model()`을 실행하고 metrics를 JSON 한 줄로 출력한다.
 
-run ID는 model 파일 이름만으로 알 수 없는 실행 단위를 표현한다. 현재는 run ID와 artifact 경로만 연결했으며, 이후 같은 run ID를 run log와 config에도 기록하면 어떤 설정과 metric이 해당 model을 만들었는지 추적할 수 있다.
+run ID는 model 파일 이름만으로 알 수 없는 실행 단위를 표현한다. 현재 같은 run ID가 run log의 metric·상태·artifact 경로를 연결한다. 이후 config도 함께 기록하면 어떤 설정이 해당 model을 만들었는지 추적할 수 있다.
 
 저장소는 소스 파일과 실행 중 생성되는 데이터를 분리한다. `logs/`와 `artifacts/`는 프로젝트 구조에 필요하지만 내부 실행 결과는 Git에 커밋하지 않는다. Git은 빈 디렉터리를 추적하지 않으므로 `.gitkeep` placeholder를 두고, `.gitignore`로 실제 생성 파일을 제외한다. `.gitkeep`은 Git의 공식 기능이 아니라 관례적인 파일 이름이다.
 

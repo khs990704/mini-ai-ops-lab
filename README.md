@@ -101,7 +101,17 @@ find artifacts -maxdepth 2 -type f -name 'model.pkl' -printf '%p %s bytes\n' | s
 python src/run_job.py
 ```
 
-이 명령은 새로운 model artifact를 생성하고 `logs/runs.jsonl` 끝에 실행 기록 한 줄을 추가한다. 기록에는 `run_id`, `status`, `started_at`, `ended_at`, `duration_seconds`, `metrics`, `artifact_path`가 포함된다. 현재는 성공한 실행만 기록하며 실패 기록은 이후 작업에서 추가한다.
+이 명령은 새로운 model artifact를 생성하고 `logs/runs.jsonl` 끝에 실행 기록 한 줄을 추가한다. 성공과 실패 기록은 공통으로 `run_id`, `status`, `started_at`, `ended_at`, `duration_seconds`, `metrics`, `artifact_path`, `error_type`, `error_message`, `traceback`을 포함한다. 성공하면 metric과 artifact 경로가 채워지고 error field는 `null`이 된다.
+
+실패 처리 경로는 다음 명령으로 안전하게 재현한다.
+
+```bash
+python src/run_job.py --fail
+echo $?
+tail -n 1 logs/runs.jsonl
+```
+
+`--fail`은 실제 환경을 손상시키지 않고 검증용 `RuntimeError`를 발생시킨다. 이 실행은 model artifact를 만들지 않고 `failed` record를 한 줄 추가하며 exit code `1`을 반환한다. 바로 이어 실행한 `echo $?`가 `1`을 출력하고 마지막 log에 오류 종류, 메시지, traceback이 있으면 예상대로 처리된 것이다.
 
 최근 실행 기록은 다음 명령으로 확인한다.
 
@@ -116,6 +126,8 @@ tail -n 3 logs/runs.jsonl
 ## 장애 시나리오
 
 학습 실패, artifact 저장 실패, 설정 오류, 도구 timeout, 허용되지 않은 도구 요청, 과도한 로그 증가를 확인하고 복구하는 방법을 문서화한다.
+
+현재 구현한 학습 실패 재현과 복구 확인 절차는 [장애 시나리오](docs/failure-scenarios.md)에서 확인할 수 있다.
 
 ## 보안과 백업 고려사항
 

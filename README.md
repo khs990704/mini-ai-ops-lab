@@ -36,15 +36,68 @@ Mini AI Ops Lab은 AI 작업을 운영하는 방법을 배우기 위한 작고 �
 
 ## 시작 방법
 
-Day 1에서는 프로젝트 기본 구조를 준비했고, Day 2에서는 명령줄에서 실행할 수 있는 기본 학습 작업을 추가했다.
+프로젝트는 local Python 환경이나 Docker container에서 실행할 수 있다. 두 방식 모두 같은 `src/run_job.py`를 사용한다.
+
+### Local Python 실행환경
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
+python src/run_job.py
 ```
 
 `.env`, 실행 중 생성된 로그, 모델 artifact는 Git에 커밋하지 않는다. 안전한 설정 예시는 `.env.example`을 사용한다.
+
+### Docker 실행환경
+
+Docker image는 기존 Python 코드를 Docker 전용으로 다시 작성하는 것이 아니라, 실행에 필요한 Linux 기반 환경, Python 3.12, dependency, `src/` 코드와 기본 명령을 함께 묶는다.
+
+프로젝트 root에서 image를 build한다.
+
+```bash
+docker build -t mini-ai-ops-lab:day6 .
+```
+
+이 명령은 base image와 dependency를 내려받아 local Docker image와 build cache를 만든다. `Dockerfile`, `requirements.txt`, `src/`를 변경했다면 새 내용을 반영하기 위해 다시 build한다.
+
+동작만 확인하고 실행 결과를 버리려면 다음처럼 실행한다.
+
+```bash
+docker run --rm mini-ai-ops-lab:day6
+```
+
+`--rm`은 실행이 끝난 container를 제거한다. 이 명령의 log와 artifact는 container 안에 있으므로 container와 함께 사라지고, build한 image는 유지된다.
+
+실제 작업 결과를 host에 보존하려면 프로젝트 root에서 `logs/`와 `artifacts/`를 bind mount한다.
+
+```bash
+docker run --rm \
+  --user "$(id -u):$(id -g)" \
+  --mount type=bind,source="$PWD/logs",target=/app/logs \
+  --mount type=bind,source="$PWD/artifacts",target=/app/artifacts \
+  mini-ai-ops-lab:day6
+```
+
+- `--user`는 생성 파일의 소유자를 현재 WSL 사용자와 맞춘다.
+- bind mount는 container의 결과 경로를 host 프로젝트 경로와 연결한다.
+- 정상 실행은 host에 success log와 `artifacts/{run_id}/model.pkl`을 만든다.
+- container는 종료 후 제거되지만 bind mount에 기록한 결과와 image는 유지된다.
+
+같은 환경에서 실패 처리를 확인하려면 image 이름 뒤에 실행 명령을 지정한다.
+
+```bash
+docker run --rm \
+  --user "$(id -u):$(id -g)" \
+  --mount type=bind,source="$PWD/logs",target=/app/logs \
+  --mount type=bind,source="$PWD/artifacts",target=/app/artifacts \
+  mini-ai-ops-lab:day6 \
+  python src/run_job.py --fail
+```
+
+예상 결과는 failed log 추가, model artifact 미생성, exit code `1`이다. 최근 결과는 `tail -n 2 logs/runs.jsonl`로 읽을 수 있다.
+
+현재 `requirements.txt`는 `scikit-learn>=1.5,<2.0`처럼 호환 가능한 version 범위를 사용한다. 한번 build된 image는 설치된 package 조합을 유지하지만, 나중에 새로 build하면 범위 안의 더 새로운 version이 선택될 수 있다. 실제 검증에서는 host의 `scikit-learn 1.5.1`과 container의 `1.9.0`이 같은 metric을 만들었지만 pickle 크기는 달랐다. pickle model은 가능한 한 생성할 때 사용한 image와 같은 환경에서 불러온다. 완전히 동일한 package 조합을 다시 build하려면 이후 별도의 lock file이나 정확한 version 고정이 필요하다.
 
 ## 학습 작업 관리
 

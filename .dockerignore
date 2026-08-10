@@ -1,0 +1,24 @@
+# local 개발환경과 Git 정보는 image 실행에 필요하지 않다.
+.git/
+.venv/
+venv/
+.vscode/
+.idea/
+
+# Python과 test tool이 생성한 cache를 제외한다.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 기존 운영 결과와 secret 가능 파일을 image에 복사하지 않는다.
+logs/
+artifacts/
+.env
+.env.*
+
+# 실행 image에 필요하지 않은 project 문서를 제외한다.
+docs/
+AGENTS.md
+README.md

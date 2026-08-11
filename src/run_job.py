@@ -12,9 +12,11 @@ from typing import Any
 
 # 파일 직접 실행과 module import 모두에서 같은 학습·저장 함수를 사용한다.
 if __package__:
+    from .config_loader import DEFAULT_TRAIN_CONFIG_PATH, load_train_config
     from .storage import generate_run_id, save_model
     from .train_job import train_model
 else:
+    from config_loader import DEFAULT_TRAIN_CONFIG_PATH, load_train_config
     from storage import generate_run_id, save_model
     from train_job import train_model
 
@@ -41,8 +43,14 @@ def append_run_log(
 
 
 def parse_args() -> argparse.Namespace:
-    """실패 처리 경로를 안전하게 검증할 수 있는 CLI option을 해석한다."""
+    """학습 설정 경로와 실패 검증 여부를 명령줄에서 읽는다."""
     parser = argparse.ArgumentParser(description="Iris 학습 작업을 실행합니다.")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=DEFAULT_TRAIN_CONFIG_PATH,
+        help=f"학습 설정 YAML 경로 (기본값: {DEFAULT_TRAIN_CONFIG_PATH})",
+    )
     parser.add_argument(
         "--fail",
         action="store_true",
@@ -51,18 +59,25 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def run_training_job(force_failure: bool = False) -> dict[str, Any]:
+def run_training_job(
+    force_failure: bool = False,
+    config_path: str | Path = DEFAULT_TRAIN_CONFIG_PATH,
+) -> dict[str, Any]:
     """학습 작업을 실행하고 성공 또는 실패 결과를 빠짐없이 기록한다."""
     run_id = generate_run_id()
     started_at = utc_now_iso()
     started_counter = perf_counter()
+    config = None
 
     try:
+        # 검증된 설정만 학습에 전달하고 실제 사용값을 실행 기록에 남긴다.
+        config = load_train_config(config_path)
+
         if force_failure:
             # 외부 환경을 손상시키지 않고 같은 실패를 반복해 처리 경로를 검증한다.
             raise RuntimeError("검증을 위해 의도적으로 발생시킨 학습 실패입니다.")
 
-        model, metrics = train_model()
+        model, metrics = train_model(config)
         artifact_path = save_model(model, run_id)
         record = {
             "run_id": run_id,
@@ -73,6 +88,8 @@ def run_training_job(force_failure: bool = False) -> dict[str, Any]:
             "duration_seconds": round(perf_counter() - started_counter, 6),
             "metrics": metrics,
             "artifact_path": str(artifact_path),
+            "config_path": str(config_path),
+            "config": config,
             "error_type": None,
             "error_message": None,
             "traceback": None,
@@ -87,6 +104,8 @@ def run_training_job(force_failure: bool = False) -> dict[str, Any]:
             "duration_seconds": round(perf_counter() - started_counter, 6),
             "metrics": None,
             "artifact_path": None,
+            "config_path": str(config_path),
+            "config": config,
             "error_type": type(error).__name__,
             "error_message": str(error),
             "traceback": traceback.format_exc(),
@@ -100,7 +119,10 @@ def run_training_job(force_failure: bool = False) -> dict[str, Any]:
 def main() -> int:
     """저장된 run 기록을 출력하고 상태에 맞는 process exit code를 반환한다."""
     args = parse_args()
-    record = run_training_job(force_failure=args.fail)
+    record = run_training_job(
+        force_failure=args.fail,
+        config_path=args.config,
+    )
     output_stream = sys.stderr if record["status"] == "failed" else sys.stdout
     print(
         json.dumps(record, ensure_ascii=False, sort_keys=True),

@@ -12,17 +12,19 @@ Mini AI Ops Lab은 단순한 학습 스크립트를 운영 가능한 작업으�
 
 - `src/train_job.py`
 - `src/run_job.py`
+- `src/config_loader.py`
 - `src/storage.py`
+- `configs/train.yaml`
 - `logs/runs.jsonl`
 - `artifacts/`
 - `docs/architecture.md`
-- 향후 추가할 `configs/train.yaml`
+- `configs/train.yaml`
 
 ### 프로젝트 디렉터리 역할
 
 | 디렉터리 | 역할 | 현재 또는 예정 내용 |
 |---|---|---|
-| `configs/` | 코드 수정 없이 실행 방식을 바꾸는 설정 보관 | 향후 `train.yaml`, `tools.yaml` |
+| `configs/` | 코드 수정 없이 실행 방식을 바꾸는 설정 보관 | 현재 `train.yaml`; 향후 `tools.yaml` |
 | `src/` | 프로젝트의 실제 동작을 구현하는 소스 코드 보관 | 현재 `train_job.py`, `run_job.py`, `storage.py`; 향후 `tool_runner.py` |
 | `logs/` | 실행 과정, 성공·실패 상태, Agent 도구 호출 기록 | 현재 `runs.jsonl`; 향후 `errors.jsonl`, `audit.jsonl` |
 | `artifacts/` | 학습 실행이 만든 결과물 보관 | 현재 실행별 `model.pkl`; 향후 설정 사본과 추가 결과 파일 |
@@ -30,14 +32,16 @@ Mini AI Ops Lab은 단순한 학습 스크립트를 운영 가능한 작업으�
 현재 흐름은 다음과 같이 이해할 수 있다.
 
 ```text
+configs/train.yaml
+    ↓
+src/config_loader.py에서 읽기와 검증
+    ↓
 src/run_job.py
     ├── src/train_job.py로 학습과 평가
     ├── src/storage.py로 model 저장
     ├── logs/에 실행 기록
     └── artifacts/에 실행 결과물
 ```
-
-`configs/`에서 학습 설정을 읽는 흐름은 Day 8 이후 추가할 예정이다.
 
 ### Day 2 기본 학습 작업
 
@@ -108,11 +112,32 @@ artifacts/{run_id}/model.pkl
 
 Architecture 문서는 날짜별 작업을 반복해서 나열하는 문서가 아니라, 현재 구성요소의 책임과 데이터 흐름 및 운영 경계를 설명한다. 날짜별 진행 과정과 검증 이력은 `docs/work-logs/`가 담당한다.
 
+### Day 8 설정 기반 학습과 재현성
+
+Day 8에서는 코드에 고정되어 있던 학습 조건을 `configs/train.yaml`로 옮겼다.
+
+```yaml
+test_size: 0.2
+random_state: 42
+max_iterations: 200
+```
+
+`src/config_loader.py`는 YAML을 읽는 데서 끝나지 않고 다음 조건을 학습 전에 검사한다.
+
+- 세 필수 항목이 모두 있는지 확인한다.
+- 오타 가능성이 있는 지원하지 않는 항목을 거부한다.
+- `test_size`가 `0`보다 크고 `1`보다 작은 숫자인지 확인한다.
+- `random_state`가 허용 범위의 정수인지 확인한다.
+- `max_iterations`가 양의 정수인지 확인한다.
+- Python에서 `bool`이 `int`의 하위 형식인 점을 고려해 `true`, `false`를 정수 설정으로 허용하지 않는다.
+
+검증을 통과한 설정만 `train_job.py`에 전달한다. `run_job.py`는 지정 경로와 실제 사용값을 `config_path`, `config`로 run log에 함께 저장한다. 설정 파일이 나중에 바뀌어도 해당 run에 사용된 값은 로그에서 확인할 수 있다.
+
 ## 알아둘 명령어나 코드
 
 ```bash
-python src/train_job.py
-python src/run_job.py
+python src/train_job.py --config configs/train.yaml
+python src/run_job.py --config configs/train.yaml
 find artifacts -maxdepth 2 -type f -name 'model.pkl' -printf '%p %s bytes\n' | sort
 ```
 
@@ -124,6 +149,10 @@ find artifacts -maxdepth 2 -type f -name 'model.pkl' -printf '%p %s bytes\n' | s
 - 증상: 과거 metric은 있지만 사용한 config 또는 artifact 경로가 없음
 - 확인할 것: `logs/runs.jsonl`, `configs/train.yaml`, `artifacts/`
 - 복구 방법: 각 실행의 config, metric, artifact 경로를 함께 저장함
+- 실패: 설정 파일을 찾을 수 없거나 설정값이 허용 범위를 벗어남
+- 증상: 학습이 시작되지 않고 `FileNotFoundError` 또는 `ValueError`가 기록됨
+- 확인할 것: `config_path`, YAML의 필수 항목, 자료형과 값 범위
+- 복구 방법: 존재하는 YAML 경로를 지정하고 `config_loader.py`가 요구하는 조건에 맞게 값을 수정한 뒤 다시 실행함
 - 실패: `python src/train_job.py`를 실행했지만 아무 출력이 없음
 - 증상: 오류 없이 바로 종료되지만 terminal에 metrics가 나타나지 않음
 - 확인할 것: `main()`과 `if __name__ == "__main__":` 진입점이 있는지 확인
@@ -139,7 +168,9 @@ find artifacts -maxdepth 2 -type f -name 'model.pkl' -printf '%p %s bytes\n' | s
 
 Python 파일에 함수를 정의하는 것만으로는 함수가 실행되지 않는다. `python src/train_job.py`처럼 파일을 직접 실행했을 때 학습을 시작하려면 `if __name__ == "__main__":` 진입점에서 `main()`을 호출해야 한다. Day 2에서는 이 진입점이 `train_model()`을 실행하고 metrics를 JSON 한 줄로 출력한다.
 
-run ID는 model 파일 이름만으로 알 수 없는 실행 단위를 표현한다. 현재 같은 run ID가 run log의 metric·상태·artifact 경로를 연결한다. 이후 config도 함께 기록하면 어떤 설정이 해당 model을 만들었는지 추적할 수 있다.
+run ID는 model 파일 이름만으로 알 수 없는 실행 단위를 표현한다. 현재 같은 run ID가 run log의 설정·metric·상태·artifact 경로를 연결하므로 어떤 조건이 해당 model을 만들었는지 추적할 수 있다.
+
+설정을 코드 밖으로 옮기면 Python source를 수정하지 않고 실험 조건을 바꿀 수 있다. 다만 YAML이라는 형식만 사용한다고 안전해지는 것은 아니다. 잘못된 비율이나 오타 난 항목으로 비싼 학습을 시작하지 않도록 실행 경계에서 값을 검증해야 한다.
 
 저장소는 소스 파일과 실행 중 생성되는 데이터를 분리한다. `logs/`와 `artifacts/`는 프로젝트 구조에 필요하지만 내부 실행 결과는 Git에 커밋하지 않는다. Git은 빈 디렉터리를 추적하지 않으므로 `.gitkeep` placeholder를 두고, `.gitignore`로 실제 생성 파일을 제외한다. `.gitkeep`은 Git의 공식 기능이 아니라 관례적인 파일 이름이다.
 
@@ -153,6 +184,8 @@ run ID는 model 파일 이름만으로 알 수 없는 실행 단위를 표현한
   답변: 당시에는 함수만 정의되어 있고 함수를 호출하는 CLI 진입점이 없었다. `main()`과 `if __name__ == "__main__":`를 추가한 뒤 같은 명령으로 학습과 JSON 출력이 실행된다.
 - 질문: Day 7 architecture 문서는 Day 1~6 내용을 정리한 것인가?
   답변: 맞다. 다만 날짜별 작업을 단순 복사한 것이 아니라, 첫 주에 만든 학습·저장·로그·실패 처리·Docker 기능이 현재 하나의 시스템으로 어떻게 연결되는지 구성요소 책임과 흐름 중심으로 정리한 문서다.
+- 질문: `config_loader.py`는 `train.yaml`의 config 값을 불러오면서 조건에 맞는지도 확인하는가?
+  답변: 맞다. YAML을 읽고 필수·추가 항목, 자료형과 값 범위를 검사한 뒤 검증된 설정만 반환한다. 조건에 맞지 않으면 학습을 시작하기 전에 오류를 발생시킨다.
 
 ## 관련 문서
 

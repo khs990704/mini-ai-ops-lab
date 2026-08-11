@@ -1,0 +1,4 @@
+# 같은 설정으로 학습을 반복할 수 있도록 주요 학습 조건을 한곳에서 관리한다.
+test_size: 0.2
+random_state: 42
+max_iterations: 200

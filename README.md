@@ -13,6 +13,10 @@ Mini AI Ops Lab은 AI 작업을 운영하는 방법을 배우기 위한 작고 �
 ```text
 Local Python 또는 Docker container
                ↓
+       configs/train.yaml
+               ↓
+      src/config_loader.py
+               ↓
           src/run_job.py
           ↙             ↘
 src/train_job.py     src/storage.py
@@ -31,6 +35,8 @@ src/train_job.py     src/storage.py
 - UTC 시각과 UUID suffix를 조합한 run ID
 - 실행별 모델 artifact 저장
 - 성공 및 실패 structured log
+- YAML 설정 검증과 설정 기반 학습
+- 실행 log의 설정 경로와 실제 사용값 기록
 - 오류 종류, 메시지와 traceback 기록
 - Local Python 및 Docker container 실행
 - 제어된 학습 실패와 복구 확인 절차
@@ -38,7 +44,6 @@ src/train_job.py     src/storage.py
 
 다음 기능은 향후 작업 범위다.
 
-- 설정 파일 기반 실험 추적과 재현
 - allowlist 기반 Agent 도구 실행
 - 도구 timeout 및 audit log
 - 운영 runbook과 보안·백업 체크리스트
@@ -54,27 +59,27 @@ src/train_job.py     src/storage.py
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-python src/run_job.py
+python src/run_job.py --config configs/train.yaml
 ```
 
 `.env`, 실행 중 생성된 로그, 모델 artifact는 Git에 커밋하지 않는다. 안전한 설정 예시는 `.env.example`을 사용한다.
 
 ### Docker 실행환경
 
-Docker image는 기존 Python 코드를 Docker 전용으로 다시 작성하는 것이 아니라, 실행에 필요한 Linux 기반 환경, Python 3.12, dependency, `src/` 코드와 기본 명령을 함께 묶는다.
+Docker image는 기존 Python 코드를 Docker 전용으로 다시 작성하는 것이 아니라, 실행에 필요한 Linux 기반 환경, Python 3.12, dependency, `src/` 코드, `configs/` 설정과 기본 명령을 함께 묶는다.
 
 프로젝트 root에서 image를 build한다.
 
 ```bash
-docker build -t mini-ai-ops-lab:day6 .
+docker build -t mini-ai-ops-lab:day8 .
 ```
 
-이 명령은 base image와 dependency를 내려받아 local Docker image와 build cache를 만든다. `Dockerfile`, `requirements.txt`, `src/`를 변경했다면 새 내용을 반영하기 위해 다시 build한다.
+이 명령은 base image와 dependency를 내려받아 local Docker image와 build cache를 만든다. `Dockerfile`, `requirements.txt`, `src/`, `configs/`를 변경했다면 새 내용을 반영하기 위해 다시 build한다.
 
 동작만 확인하고 실행 결과를 버리려면 다음처럼 실행한다.
 
 ```bash
-docker run --rm mini-ai-ops-lab:day6
+docker run --rm mini-ai-ops-lab:day8
 ```
 
 `--rm`은 실행이 끝난 container를 제거한다. 이 명령의 log와 artifact는 container 안에 있으므로 container와 함께 사라지고, build한 image는 유지된다.
@@ -86,7 +91,7 @@ docker run --rm \
   --user "$(id -u):$(id -g)" \
   --mount type=bind,source="$PWD/logs",target=/app/logs \
   --mount type=bind,source="$PWD/artifacts",target=/app/artifacts \
-  mini-ai-ops-lab:day6
+  mini-ai-ops-lab:day8
 ```
 
 - `--user`는 생성 파일의 소유자를 현재 WSL 사용자와 맞춘다.
@@ -101,7 +106,7 @@ docker run --rm \
   --user "$(id -u):$(id -g)" \
   --mount type=bind,source="$PWD/logs",target=/app/logs \
   --mount type=bind,source="$PWD/artifacts",target=/app/artifacts \
-  mini-ai-ops-lab:day6 \
+  mini-ai-ops-lab:day8 \
   python src/run_job.py --fail
 ```
 
@@ -111,18 +116,18 @@ docker run --rm \
 
 ## 학습 작업 관리
 
-기본 학습 작업은 scikit-learn 내장 Iris dataset을 학습용 80%, 검증용 20%로 나눈 뒤 `LogisticRegression` 모델을 학습하고 accuracy를 계산한다.
+기본 학습 작업은 `configs/train.yaml`에 따라 scikit-learn 내장 Iris dataset을 나눈 뒤 `LogisticRegression` 모델을 학습하고 accuracy를 계산한다.
 
 학습과 artifact 저장만 직접 확인하려면 프로젝트 root에서 다음 명령을 실행한다.
 
 ```bash
-python src/train_job.py
+python src/train_job.py --config configs/train.yaml
 ```
 
 정상 실행되면 다음과 같은 JSON 한 줄이 출력된다.
 
 ```json
-{"artifact_path": "artifacts/20260805T043140293097Z-eed6e816/model.pkl", "metrics": {"accuracy": 0.9666666666666667, "test_samples": 30, "train_samples": 120}, "run_id": "20260805T043140293097Z-eed6e816"}
+{"artifact_path": "artifacts/{run_id}/model.pkl", "config": {"max_iterations": 200, "random_state": 42, "test_size": 0.2}, "config_path": "configs/train.yaml", "metrics": {"accuracy": 0.9666666666666667, "test_samples": 30, "train_samples": 120}, "run_id": "{run_id}"}
 ```
 
 run ID는 실행할 때마다 달라진다. 실제 운영 흐름에서는 아래의 `src/run_job.py`를 사용해 학습 결과를 run log와 함께 기록한다.
@@ -143,9 +148,21 @@ find artifacts -maxdepth 2 -type f -name 'model.pkl' -printf '%p %s bytes\n' | s
 
 이 명령은 파일을 변경하지 않고 artifact 경로와 크기를 출력한다. `artifacts/`의 실행 결과는 `.gitignore`에 따라 Git에서 제외된다. `model.pkl`은 Python pickle 형식이므로 신뢰할 수 없는 외부 파일을 불러오지 않는다.
 
-## 향후 구현: 실험 추적
+## 설정 기반 실험 추적
 
-현재 학습 파라미터는 `src/train_job.py`의 상수로 관리한다. 이후 `configs/train.yaml`을 추가하고 config, metric, 상태와 artifact 경로를 같은 run ID에 연결하여 실험을 비교하고 재현할 수 있게 한다.
+학습 조건은 다음처럼 `configs/train.yaml`에서 관리한다.
+
+```yaml
+test_size: 0.2
+random_state: 42
+max_iterations: 200
+```
+
+- `test_size`: 전체 data 중 검증에 사용할 비율이며 `0`보다 크고 `1`보다 작아야 한다.
+- `random_state`: 같은 방식으로 data를 나누기 위한 난수값이며 허용 범위의 정수여야 한다.
+- `max_iterations`: model 학습의 최대 반복 횟수이며 양의 정수여야 한다.
+
+`src/config_loader.py`는 학습 전에 필수 항목, 추가 항목, 자료형과 값의 범위를 검사한다. 조건이 잘못되었거나 파일이 없으면 학습을 시작하지 않고 failed record를 남긴다. `logs/runs.jsonl`에는 설정 경로뿐 아니라 검증을 통과한 실제 값도 저장하므로, 나중에 설정 파일이 바뀌어도 각 run에 사용된 조건을 확인할 수 있다.
 
 ## 향후 구현: Agent 도구 실행기
 
@@ -161,10 +178,10 @@ find artifacts -maxdepth 2 -type f -name 'model.pkl' -printf '%p %s bytes\n' | s
 성공한 학습 실행을 기록하려면 프로젝트 root에서 다음 명령을 실행한다.
 
 ```bash
-python src/run_job.py
+python src/run_job.py --config configs/train.yaml
 ```
 
-이 명령은 새로운 model artifact를 생성하고 `logs/runs.jsonl` 끝에 실행 기록 한 줄을 추가한다. 성공과 실패 기록은 공통으로 `run_id`, `status`, `started_at`, `ended_at`, `duration_seconds`, `metrics`, `artifact_path`, `error_type`, `error_message`, `traceback`을 포함한다. 성공하면 metric과 artifact 경로가 채워지고 error field는 `null`이 된다.
+이 명령은 새로운 model artifact를 생성하고 `logs/runs.jsonl` 끝에 실행 기록 한 줄을 추가한다. 성공과 실패 기록은 공통으로 `run_id`, `status`, `started_at`, `ended_at`, `duration_seconds`, `config_path`, `config`, `metrics`, `artifact_path`, `error_type`, `error_message`, `traceback`을 포함한다. 성공하면 검증된 설정, metric과 artifact 경로가 채워지고 error field는 `null`이 된다.
 
 실패 처리 경로는 다음 명령으로 안전하게 재현한다.
 
@@ -188,7 +205,7 @@ tail -n 3 logs/runs.jsonl
 
 ## 장애 시나리오
 
-현재는 제어된 학습 실패의 증상, log 확인과 정상 실행을 통한 복구 절차를 문서화했다. Artifact 저장 실패, 설정 오류, 도구 timeout, 허용되지 않은 도구 요청과 과도한 log 증가는 관련 기능을 구현하면서 추가한다.
+현재는 제어된 학습 실패의 증상, log 확인과 정상 실행을 통한 복구 절차를 문서화했다. 설정 파일이 없거나 조건이 잘못된 경우도 학습 전에 실패로 기록한다. Artifact 저장 실패, 도구 timeout, 허용되지 않은 도구 요청과 과도한 log 증가는 관련 기능을 구현하면서 추가한다.
 
 현재 구현한 학습 실패 재현과 복구 확인 절차는 [장애 시나리오](docs/failure-scenarios.md)에서 확인할 수 있다.
 

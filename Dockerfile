@@ -15,6 +15,8 @@ RUN python -m pip install \
     -r requirements.txt
 
 COPY src/ ./src/
+# 기본 학습 설정도 image에 포함해 local과 container가 같은 조건을 사용하게 한다.
+COPY configs/ ./configs/
 
 # 실행 결과 경로를 준비하고 root 대신 전용 사용자로 작업을 실행한다.
 RUN useradd --create-home --uid 10001 appuser \

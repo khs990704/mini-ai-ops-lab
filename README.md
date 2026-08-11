@@ -2,37 +2,47 @@
 
 ## 프로젝트 소개
 
-Mini AI Ops Lab은 AI 작업을 운영하는 방법을 배우기 위한 작고 이해하기 쉬운 시스템이다. 학습 작업을 실행하고, 성공과 실패 결과를 기록하며, 모델 artifact를 저장한다. 또한 Agent의 도구 호출을 allowlist, timeout, audit log로 통제한다.
+Mini AI Ops Lab은 AI 작업을 운영하는 방법을 배우기 위한 작고 이해하기 쉬운 시스템이다. 현재는 학습 작업을 실행하고, 성공과 실패 결과를 기록하며, model artifact를 실행별로 저장한다. 이후 Agent 도구 호출을 allowlist, timeout과 audit log로 통제하는 기능까지 확장한다.
 
 이 프로젝트는 모델 정확도보다 추적과 복구 가능성을 중요하게 생각한다. 어떤 설정으로 실행했는지, 성공했는지, 어떤 metric과 artifact가 생성됐는지를 나중에도 확인할 수 있어야 한다.
 
 ## 아키텍처
 
-구현할 전체 운영 흐름은 다음과 같다.
+현재 구현된 학습 운영 흐름은 다음과 같다.
 
 ```text
-학습 설정 -> 작업 실행기 -> 학습 작업
-                   |-> JSONL 실행 및 실패 로그
-                   `-> 실행별 모델 artifact
-
-도구 요청 -> allowlist와 입력 검증 -> 통제된 도구 실행
-                                      `-> JSONL audit log
+Local Python 또는 Docker container
+               ↓
+          src/run_job.py
+          ↙             ↘
+src/train_job.py     src/storage.py
+          ↘             ↙
+        logs/runs.jsonl
+        artifacts/{run_id}/model.pkl
 ```
 
-매일 구현과 검증이 가능한 작은 단위로 기능을 추가하며, 각 작업일에는 코드 또는 문서 형태의 증거를 남긴다.
+`src/run_job.py`가 학습과 저장을 조정하고 성공·실패 record를 남긴다. 상세한 구성요소 책임과 실행 sequence는 [Architecture](docs/architecture.md)에서 확인할 수 있다.
 
 ## 주요 기능
 
-구현할 핵심 기능은 다음과 같다.
+첫 주에 구현하고 검증한 기능은 다음과 같다.
 
 - 명령줄 기반 학습 작업 실행
-- 설정 파일 기반 실험 추적
+- UTC 시각과 UUID suffix를 조합한 run ID
 - 실행별 모델 artifact 저장
 - 성공 및 실패 structured log
+- 오류 종류, 메시지와 traceback 기록
+- Local Python 및 Docker container 실행
+- 제어된 학습 실패와 복구 확인 절차
+- 프로젝트 내부 기술 위키와 날짜별 작업 기록
+
+다음 기능은 향후 작업 범위다.
+
+- 설정 파일 기반 실험 추적과 재현
 - allowlist 기반 Agent 도구 실행
 - 도구 timeout 및 audit log
-- 운영 runbook, 장애 시나리오, 보안·백업 체크리스트
-- 프로젝트 내부 기술 위키
+- 운영 runbook과 보안·백업 체크리스트
+- 추가 장애 시나리오와 log retention
 
 ## 시작 방법
 
@@ -133,20 +143,20 @@ find artifacts -maxdepth 2 -type f -name 'model.pkl' -printf '%p %s bytes\n' | s
 
 이 명령은 파일을 변경하지 않고 artifact 경로와 크기를 출력한다. `artifacts/`의 실행 결과는 `.gitignore`에 따라 Git에서 제외된다. `model.pkl`은 Python pickle 형식이므로 신뢰할 수 없는 외부 파일을 불러오지 않는다.
 
-## 실험 추적
+## 향후 구현: 실험 추적
 
-학습 파라미터는 `configs/` 아래에서 관리한다. 실행별로 파라미터, metric, 상태, artifact 경로를 연결하여 실험을 비교하고 재현할 수 있게 한다.
+현재 학습 파라미터는 `src/train_job.py`의 상수로 관리한다. 이후 `configs/train.yaml`을 추가하고 config, metric, 상태와 artifact 경로를 같은 run ID에 연결하여 실험을 비교하고 재현할 수 있게 한다.
 
-## Agent 도구 실행기
+## 향후 구현: Agent 도구 실행기
 
-도구 실행기는 allowlist에 정의된 도구만 허용한다. 등록되지 않은 도구는 거부하고, 허용된 실행에도 timeout을 적용한다.
+향후 `configs/tools.yaml`과 `src/tool_runner.py`를 추가한다. 도구 실행기는 allowlist에 정의된 도구만 허용하고, 등록되지 않은 요청을 거부하며, 허용된 실행에도 timeout을 적용할 계획이다.
 
 ## 로그와 감사 기록
 
 실행 중 생성되는 운영 기록은 JSON Lines(JSONL) 형식을 사용한다.
 
 - `logs/runs.jsonl`: 학습 실행 기록
-- `logs/audit.jsonl`: Agent 도구 호출 기록
+- `logs/audit.jsonl`: 향후 추가할 Agent 도구 호출 기록
 
 성공한 학습 실행을 기록하려면 프로젝트 root에서 다음 명령을 실행한다.
 
@@ -178,7 +188,7 @@ tail -n 3 logs/runs.jsonl
 
 ## 장애 시나리오
 
-학습 실패, artifact 저장 실패, 설정 오류, 도구 timeout, 허용되지 않은 도구 요청, 과도한 로그 증가를 확인하고 복구하는 방법을 문서화한다.
+현재는 제어된 학습 실패의 증상, log 확인과 정상 실행을 통한 복구 절차를 문서화했다. Artifact 저장 실패, 설정 오류, 도구 timeout, 허용되지 않은 도구 요청과 과도한 log 증가는 관련 기능을 구현하면서 추가한다.
 
 현재 구현한 학습 실패 재현과 복구 확인 절차는 [장애 시나리오](docs/failure-scenarios.md)에서 확인할 수 있다.
 
@@ -188,7 +198,7 @@ tail -n 3 logs/runs.jsonl
 - 안전한 예시 설정만 커밋한다.
 - 로그에 민감한 운영 정보가 포함될 수 있다고 가정한다.
 - artifact가 쌓이기 전에 보존 기간과 백업 절차를 정한다.
-- 도구 실행기에는 allowlist에 필요한 최소 권한만 부여한다.
+- 향후 도구 실행기에는 allowlist에 필요한 최소 권한만 부여한다.
 
 ## 기술 위키와 작업 기록
 

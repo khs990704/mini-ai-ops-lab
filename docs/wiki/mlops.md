@@ -10,31 +10,34 @@ Mini AI Ops Lab은 단순한 학습 스크립트를 운영 가능한 작업으�
 
 ## 저장소에서 사용되는 위치
 
-- `configs/train.yaml`
 - `src/train_job.py`
 - `src/run_job.py`
+- `src/storage.py`
 - `logs/runs.jsonl`
 - `artifacts/`
+- `docs/architecture.md`
+- 향후 추가할 `configs/train.yaml`
 
 ### 프로젝트 디렉터리 역할
 
-| 디렉터리 | 역할 | 앞으로 저장할 내용 |
+| 디렉터리 | 역할 | 현재 또는 예정 내용 |
 |---|---|---|
-| `configs/` | 코드 수정 없이 실행 방식을 바꾸는 설정 보관 | `train.yaml`, `tools.yaml` |
-| `src/` | 프로젝트의 실제 동작을 구현하는 소스 코드 보관 | `train_job.py`, `run_job.py`, `tool_runner.py` |
-| `logs/` | 실행 과정, 성공·실패 상태, Agent 도구 호출 기록 | `runs.jsonl`, `errors.jsonl`, `audit.jsonl` |
-| `artifacts/` | 학습 실행이 만든 결과물 보관 | 실행별 `model.pkl`, 설정 사본, 결과 파일 |
+| `configs/` | 코드 수정 없이 실행 방식을 바꾸는 설정 보관 | 향후 `train.yaml`, `tools.yaml` |
+| `src/` | 프로젝트의 실제 동작을 구현하는 소스 코드 보관 | 현재 `train_job.py`, `run_job.py`, `storage.py`; 향후 `tool_runner.py` |
+| `logs/` | 실행 과정, 성공·실패 상태, Agent 도구 호출 기록 | 현재 `runs.jsonl`; 향후 `errors.jsonl`, `audit.jsonl` |
+| `artifacts/` | 학습 실행이 만든 결과물 보관 | 현재 실행별 `model.pkl`; 향후 설정 사본과 추가 결과 파일 |
 
-전체 흐름은 다음과 같이 이해할 수 있다.
+현재 흐름은 다음과 같이 이해할 수 있다.
 
 ```text
-configs/의 설정
-       ↓
-src/의 코드 실행
-       ↓
-├── logs/에 실행 기록
-└── artifacts/에 실행 결과물
+src/run_job.py
+    ├── src/train_job.py로 학습과 평가
+    ├── src/storage.py로 model 저장
+    ├── logs/에 실행 기록
+    └── artifacts/에 실행 결과물
 ```
+
+`configs/`에서 학습 설정을 읽는 흐름은 Day 8 이후 추가할 예정이다.
 
 ### Day 2 기본 학습 작업
 
@@ -93,6 +96,18 @@ artifacts/{run_id}/model.pkl
 
 `model.pkl`은 학습된 실제 결과물이고, `runs.jsonl`은 그 결과물이 언제 생성됐고 metric과 실행 시간이 어땠는지를 설명하는 운영 기록이다.
 
+### Day 7 component boundary
+
+첫 주 기능은 다음 책임으로 분리된다.
+
+- `run_job.py`: 실행 전체를 조정하고 성공·실패 상태와 exit code를 결정함
+- `train_job.py`: data 분리, model 학습과 metric 계산을 담당함
+- `storage.py`: run ID와 model artifact 저장을 담당함
+- `runs.jsonl`: 실행 상태와 원인을 설명함
+- `artifacts/`: 학습된 실제 결과물을 보관함
+
+Architecture 문서는 날짜별 작업을 반복해서 나열하는 문서가 아니라, 현재 구성요소의 책임과 데이터 흐름 및 운영 경계를 설명한다. 날짜별 진행 과정과 검증 이력은 `docs/work-logs/`가 담당한다.
+
 ## 알아둘 명령어나 코드
 
 ```bash
@@ -136,10 +151,13 @@ run ID는 model 파일 이름만으로 알 수 없는 실행 단위를 표현한
   답변: `configs/`는 실행 설정, `src/`는 실행 코드, `logs/`는 실행 과정과 상태 기록, `artifacts/`는 학습으로 생성된 모델과 결과물을 담당한다. 설정과 코드가 실행되면 로그와 artifact가 만들어지는 흐름이다.
 - 질문: `python src/train_job.py`를 실행했는데 왜 출력되는 것이 없는가?
   답변: 당시에는 함수만 정의되어 있고 함수를 호출하는 CLI 진입점이 없었다. `main()`과 `if __name__ == "__main__":`를 추가한 뒤 같은 명령으로 학습과 JSON 출력이 실행된다.
+- 질문: Day 7 architecture 문서는 Day 1~6 내용을 정리한 것인가?
+  답변: 맞다. 다만 날짜별 작업을 단순 복사한 것이 아니라, 첫 주에 만든 학습·저장·로그·실패 처리·Docker 기능이 현재 하나의 시스템으로 어떻게 연결되는지 구성요소 책임과 흐름 중심으로 정리한 문서다.
 
 ## 관련 문서
 
 - [프로젝트 계획](../project-plan.md)
 - [일별 작업 흐름](../daily-codex-workflow.md)
 - [프로젝트 README](../../README.md)
+- [Architecture](../architecture.md)
 - [로깅과 모니터링](logging-monitoring.md)

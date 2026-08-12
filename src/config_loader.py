@@ -12,12 +12,18 @@ DEFAULT_TRAIN_CONFIG_PATH = Path("configs/train.yaml")
 class TrainConfig(TypedDict):
     """학습 코드가 사용하는 검증 완료 설정의 구조를 나타낸다."""
 
+    experiment_name: str
     test_size: float
     random_state: int
     max_iterations: int
 
 
-REQUIRED_KEYS = {"test_size", "random_state", "max_iterations"}
+REQUIRED_KEYS = {
+    "experiment_name",
+    "test_size",
+    "random_state",
+    "max_iterations",
+}
 
 
 def load_train_config(config_path: str | Path) -> TrainConfig:
@@ -43,9 +49,16 @@ def load_train_config(config_path: str | Path) -> TrainConfig:
     if unexpected_keys:
         raise ValueError(f"지원하지 않는 설정입니다: {', '.join(sorted(unexpected_keys))}")
 
+    experiment_name = raw_config["experiment_name"]
     test_size = raw_config["test_size"]
     random_state = raw_config["random_state"]
     max_iterations = raw_config["max_iterations"]
+
+    # 식별 가능한 이름을 강제해 이름 없는 run이 새로 쌓이지 않게 한다.
+    if not isinstance(experiment_name, str) or not experiment_name.strip():
+        raise ValueError("experiment_name은 비어 있지 않은 문자열이어야 합니다.")
+    if len(experiment_name.strip()) > 100:
+        raise ValueError("experiment_name은 100자 이하여야 합니다.")
 
     # bool은 Python에서 int의 하위 형식이므로 명시적으로 제외한다.
     if isinstance(test_size, bool) or not isinstance(test_size, (int, float)):
@@ -62,6 +75,7 @@ def load_train_config(config_path: str | Path) -> TrainConfig:
         raise ValueError("max_iterations는 0보다 커야 합니다.")
 
     return {
+        "experiment_name": experiment_name.strip(),
         "test_size": float(test_size),
         "random_state": random_state,
         "max_iterations": max_iterations,

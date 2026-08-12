@@ -16,8 +16,8 @@ YYYY-MM-DD-DayN.md
 
 ## 현재 상태
 
-- 완료한 작업일: Day 8
-- 다음 작업: Day 9 - Experiment Tracking
+- 완료한 작업일: Day 9
+- 다음 작업: Day 10 - Reproduction Procedure
 - 우선순위: 프로젝트 구현과 기술 학습 기록 만들기
 
 ## 작업 기록
@@ -30,3 +30,4 @@ YYYY-MM-DD-DayN.md
 - [Day 6 - 2026-08-10](2026-08-10-Day6.md)
 - [Day 7 - 2026-08-11](2026-08-11-Day7.md)
 - [Day 8 - 2026-08-11](2026-08-11-Day8.md)
+- [Day 9 - 2026-08-12](2026-08-12-Day9.md)

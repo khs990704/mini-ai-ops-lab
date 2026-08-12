@@ -23,13 +23,16 @@ src/train_job.py     src/storage.py
           ↘             ↙
         logs/runs.jsonl
         artifacts/{run_id}/model.pkl
+               ↓
+        src/list_runs.py
+       최근 실험 결과 비교
 ```
 
 `src/run_job.py`가 학습과 저장을 조정하고 성공·실패 record를 남긴다. 상세한 구성요소 책임과 실행 sequence는 [Architecture](docs/architecture.md)에서 확인할 수 있다.
 
 ## 주요 기능
 
-첫 주에 구현하고 검증한 기능은 다음과 같다.
+현재 구현하고 검증한 기능은 다음과 같다.
 
 - 명령줄 기반 학습 작업 실행
 - UTC 시각과 UUID suffix를 조합한 run ID
@@ -37,6 +40,8 @@ src/train_job.py     src/storage.py
 - 성공 및 실패 structured log
 - YAML 설정 검증과 설정 기반 학습
 - 실행 log의 설정 경로와 실제 사용값 기록
+- 실험 이름별 run grouping과 parameter·metric 비교
+- 최근 run 목록 및 실험 이름 filter
 - 오류 종류, 메시지와 traceback 기록
 - Local Python 및 Docker container 실행
 - 제어된 학습 실패와 복구 확인 절차
@@ -71,7 +76,7 @@ Docker image는 기존 Python 코드를 Docker 전용으로 다시 작성하는 
 프로젝트 root에서 image를 build한다.
 
 ```bash
-docker build -t mini-ai-ops-lab:day8 .
+docker build -t mini-ai-ops-lab:day9 .
 ```
 
 이 명령은 base image와 dependency를 내려받아 local Docker image와 build cache를 만든다. `Dockerfile`, `requirements.txt`, `src/`, `configs/`를 변경했다면 새 내용을 반영하기 위해 다시 build한다.
@@ -79,7 +84,7 @@ docker build -t mini-ai-ops-lab:day8 .
 동작만 확인하고 실행 결과를 버리려면 다음처럼 실행한다.
 
 ```bash
-docker run --rm mini-ai-ops-lab:day8
+docker run --rm mini-ai-ops-lab:day9
 ```
 
 `--rm`은 실행이 끝난 container를 제거한다. 이 명령의 log와 artifact는 container 안에 있으므로 container와 함께 사라지고, build한 image는 유지된다.
@@ -91,7 +96,7 @@ docker run --rm \
   --user "$(id -u):$(id -g)" \
   --mount type=bind,source="$PWD/logs",target=/app/logs \
   --mount type=bind,source="$PWD/artifacts",target=/app/artifacts \
-  mini-ai-ops-lab:day8
+  mini-ai-ops-lab:day9
 ```
 
 - `--user`는 생성 파일의 소유자를 현재 WSL 사용자와 맞춘다.
@@ -106,11 +111,23 @@ docker run --rm \
   --user "$(id -u):$(id -g)" \
   --mount type=bind,source="$PWD/logs",target=/app/logs \
   --mount type=bind,source="$PWD/artifacts",target=/app/artifacts \
-  mini-ai-ops-lab:day8 \
+  mini-ai-ops-lab:day9 \
   python src/run_job.py --fail
 ```
 
 예상 결과는 failed log 추가, model artifact 미생성, exit code `1`이다. 최근 결과는 `tail -n 2 logs/runs.jsonl`로 읽을 수 있다.
+
+Container에서 host의 최근 실험 기록을 읽기만 하려면 `logs/`를 read-only로 연결한다.
+
+```bash
+docker run --rm \
+  --user "$(id -u):$(id -g)" \
+  --mount type=bind,source="$PWD/logs",target=/app/logs,readonly \
+  mini-ai-ops-lab:day9 \
+  python src/list_runs.py --experiment iris-baseline --limit 3
+```
+
+이 명령은 image나 log를 변경하지 않고 선택한 실험의 최근 run을 최신순으로 출력한다.
 
 현재 `requirements.txt`는 `scikit-learn>=1.5,<2.0`처럼 호환 가능한 version 범위를 사용한다. 한번 build된 image는 설치된 package 조합을 유지하지만, 나중에 새로 build하면 범위 안의 더 새로운 version이 선택될 수 있다. 실제 검증에서는 host의 `scikit-learn 1.5.1`과 container의 `1.9.0`이 같은 metric을 만들었지만 pickle 크기는 달랐다. pickle model은 가능한 한 생성할 때 사용한 image와 같은 환경에서 불러온다. 완전히 동일한 package 조합을 다시 build하려면 이후 별도의 lock file이나 정확한 version 고정이 필요하다.
 
@@ -127,7 +144,7 @@ python src/train_job.py --config configs/train.yaml
 정상 실행되면 다음과 같은 JSON 한 줄이 출력된다.
 
 ```json
-{"artifact_path": "artifacts/{run_id}/model.pkl", "config": {"max_iterations": 200, "random_state": 42, "test_size": 0.2}, "config_path": "configs/train.yaml", "metrics": {"accuracy": 0.9666666666666667, "test_samples": 30, "train_samples": 120}, "run_id": "{run_id}"}
+{"artifact_path": "artifacts/{run_id}/model.pkl", "config": {"experiment_name": "iris-baseline", "max_iterations": 200, "random_state": 42, "test_size": 0.2}, "config_path": "configs/train.yaml", "metrics": {"accuracy": 0.9666666666666667, "test_samples": 30, "train_samples": 120}, "run_id": "{run_id}"}
 ```
 
 run ID는 실행할 때마다 달라진다. 실제 운영 흐름에서는 아래의 `src/run_job.py`를 사용해 학습 결과를 run log와 함께 기록한다.
@@ -153,16 +170,27 @@ find artifacts -maxdepth 2 -type f -name 'model.pkl' -printf '%p %s bytes\n' | s
 학습 조건은 다음처럼 `configs/train.yaml`에서 관리한다.
 
 ```yaml
+experiment_name: iris-baseline
 test_size: 0.2
 random_state: 42
 max_iterations: 200
 ```
 
+- `experiment_name`: 같은 목적의 여러 run을 묶는 이름이며 비어 있지 않은 100자 이하 문자열이어야 한다.
 - `test_size`: 전체 data 중 검증에 사용할 비율이며 `0`보다 크고 `1`보다 작아야 한다.
 - `random_state`: 같은 방식으로 data를 나누기 위한 난수값이며 허용 범위의 정수여야 한다.
 - `max_iterations`: model 학습의 최대 반복 횟수이며 양의 정수여야 한다.
 
-`src/config_loader.py`는 학습 전에 필수 항목, 추가 항목, 자료형과 값의 범위를 검사한다. 조건이 잘못되었거나 파일이 없으면 학습을 시작하지 않고 failed record를 남긴다. `logs/runs.jsonl`에는 설정 경로뿐 아니라 검증을 통과한 실제 값도 저장하므로, 나중에 설정 파일이 바뀌어도 각 run에 사용된 조건을 확인할 수 있다.
+`experiment_name`은 같은 목적의 실행을 묶고, `run_id`는 그 안의 개별 실행 한 번을 구분한다. `src/config_loader.py`는 학습 전에 필수 항목, 추가 항목, 자료형과 값의 범위를 검사한다. 조건이 잘못되었거나 파일이 없으면 학습을 시작하지 않고 failed record를 남긴다.
+
+`logs/runs.jsonl`에는 설정 전체와 함께 비교용 `experiment_name`, `parameters`, `metrics`, `artifact_path`를 기록한다. 따라서 같은 실험의 parameter와 결과를 비교하고 어느 run이 어떤 model을 만들었는지 찾을 수 있다.
+
+```bash
+python src/list_runs.py --limit 5
+python src/list_runs.py --experiment iris-baseline --limit 3
+```
+
+두 명령은 run log를 읽기만 한다. 첫 번째는 전체 최근 run을, 두 번째는 `iris-baseline`의 최근 run만 최신순으로 출력한다. Day 9 이전 record에 새 field가 없으면 `-`로 표시하고, 기존 `config`에 parameter가 있으면 비교 열을 보완한다.
 
 ## 향후 구현: Agent 도구 실행기
 
@@ -181,7 +209,7 @@ max_iterations: 200
 python src/run_job.py --config configs/train.yaml
 ```
 
-이 명령은 새로운 model artifact를 생성하고 `logs/runs.jsonl` 끝에 실행 기록 한 줄을 추가한다. 성공과 실패 기록은 공통으로 `run_id`, `status`, `started_at`, `ended_at`, `duration_seconds`, `config_path`, `config`, `metrics`, `artifact_path`, `error_type`, `error_message`, `traceback`을 포함한다. 성공하면 검증된 설정, metric과 artifact 경로가 채워지고 error field는 `null`이 된다.
+이 명령은 새로운 model artifact를 생성하고 `logs/runs.jsonl` 끝에 실행 기록 한 줄을 추가한다. 성공과 실패 기록은 공통으로 `run_id`, `experiment_name`, `parameters`, `status`, `started_at`, `ended_at`, `duration_seconds`, `config_path`, `config`, `metrics`, `artifact_path`, `error_type`, `error_message`, `traceback`을 포함한다. 성공하면 검증된 설정, metric과 artifact 경로가 채워지고 error field는 `null`이 된다.
 
 실패 처리 경로는 다음 명령으로 안전하게 재현한다.
 
@@ -196,10 +224,10 @@ tail -n 1 logs/runs.jsonl
 최근 실행 기록은 다음 명령으로 확인한다.
 
 ```bash
-tail -n 3 logs/runs.jsonl
+python src/list_runs.py --limit 3
 ```
 
-`tail` 명령은 로그를 변경하지 않고 마지막 세 줄을 출력한다. JSONL은 한 실행을 독립된 JSON 한 줄로 저장하므로 기존 전체 내용을 다시 쓰지 않고 새 기록을 추가할 수 있다.
+이 명령은 로그를 변경하지 않고 최근 세 run의 실험 이름, 상태, accuracy, parameter, run ID와 artifact 경로를 비교 가능한 열로 출력한다. 원본 JSON을 확인해야 할 때는 `tail -n 3 logs/runs.jsonl`을 사용한다. JSONL은 한 실행을 독립된 JSON 한 줄로 저장하므로 기존 전체 내용을 다시 쓰지 않고 새 기록을 추가할 수 있다.
 
 생성된 로그 파일은 Git에서 제외한다. 빈 디렉터리는 `.gitkeep` placeholder를 사용해 저장소에 유지한다.
 

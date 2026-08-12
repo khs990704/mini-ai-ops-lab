@@ -17,6 +17,7 @@ structured log는 상태와 시각 같은 정보를 정해진 field로 기록한
 - `logs/errors.jsonl`
 - `src/run_job.py`
 - `src/config_loader.py`
+- `src/list_runs.py`
 - `src/tool_runner.py`
 
 ### Day 4~5 성공·실패 run log
@@ -28,6 +29,7 @@ structured log는 상태와 시각 같은 정보를 정해진 field로 기록한
 - `started_at`, `ended_at`: UTC ISO 8601 형식의 실행 시작·종료 시각
 - `duration_seconds`: `perf_counter()`로 측정한 경과 시간
 - `config_path`, `config`: 지정한 설정 경로와 검증을 통과해 실제 사용한 값
+- `experiment_name`, `parameters`: 같은 목적의 run grouping과 비교용 학습값
 - `metrics`, `artifact_path`: 성공하면 결과가 있고 실패하면 `null`
 - `error_type`, `error_message`, `traceback`: 실패하면 원인이 있고 성공하면 `null`
 
@@ -37,13 +39,15 @@ structured log는 상태와 시각 같은 정보를 정해진 field로 기록한
 python src/run_job.py --config configs/train.yaml
 python src/run_job.py --config configs/missing.yaml
 python src/run_job.py --fail
+python src/list_runs.py --limit 5
+python src/list_runs.py --experiment iris-baseline --limit 3
 echo $?
 tail -n 3 logs/runs.jsonl
 tail -n 5 logs/audit.jsonl
 wc -l logs/runs.jsonl
 ```
 
-첫 번째 실행은 새 artifact와 success log를 만든다. 존재하지 않는 설정 경로는 `FileNotFoundError` failed log를 남기며 artifact를 만들지 않는다. `--fail` 실행은 검증용 exception을 발생시켜 failed log만 만든다. `echo $?`는 바로 앞 process의 exit code를 확인한다. `tail`과 `wc`는 로그를 변경하지 않고 최근 기록이나 전체 줄 수를 확인한다.
+첫 번째 실행은 새 artifact와 success log를 만든다. 존재하지 않는 설정 경로는 `FileNotFoundError` failed log를 남기며 artifact를 만들지 않는다. `--fail` 실행은 검증용 exception을 발생시켜 failed log만 만든다. `list_runs.py` 명령은 전체 또는 선택한 실험의 최근 record를 변경 없이 조회한다. `echo $?`는 바로 앞 process의 exit code를 확인한다. `tail`과 `wc`는 원본 로그나 전체 줄 수를 확인한다.
 
 ## 흔한 실패 사례
 
@@ -63,6 +67,10 @@ wc -l logs/runs.jsonl
 - 증상: failed record의 `config_path`는 있지만 `config`는 `null`임
 - 확인할 것: `error_type`, `error_message`와 지정한 설정 파일의 존재 여부
 - 복구 방법: 설정 경로와 파일 내용을 수정한 뒤 같은 운영 명령을 다시 실행함
+- 실패: JSONL 일부가 손상돼 최근 run 조회가 중단됨
+- 증상: 특정 line에서 JSON decode 오류가 발생함
+- 확인할 것: `list_runs.py`가 출력한 경고의 line 번호와 원본 `logs/runs.jsonl`
+- 복구 방법: 조회 도구는 손상 line을 경고 후 건너뛰고 나머지를 표시한다. 원본 수정 전에는 별도 backup과 손상 원인 확인이 필요함
 
 ## 실용적인 이해
 
@@ -75,6 +83,8 @@ wc -l logs/runs.jsonl
 exception을 잡는 목적은 실패를 성공처럼 숨기는 것이 아니라 원인을 기록 가능한 데이터로 바꾸는 것이다. 실패 record를 저장한 뒤에도 CLI는 exit code `1`을 반환해 shell이나 상위 시스템이 실패를 인식하게 한다. 성공은 `stdout`과 exit code `0`, 실패는 `stderr`와 exit code `1`로 구분한다.
 
 설정 로드도 run의 일부이므로 학습 전에 실패하더라도 실행 기록을 남긴다. 파일을 읽지 못한 경우 `config_path`는 사용자가 요청한 경로를 보존하고, 검증된 값이 없다는 사실은 `config: null`로 구분한다.
+
+`src/list_runs.py`는 JSONL을 앞에서부터 한 줄씩 읽되 filter를 통과한 최근 N개만 `deque`에 유지하고 최신순으로 출력한다. Day 9 이전 record는 새 field가 없어도 오류로 처리하지 않고 없는 값은 `-`로 표시한다. 기존 `config`에 학습값이 있으면 `parameters` 열을 보완하되 원본 record는 수정하지 않는다.
 
 traceback은 오류가 어느 호출 경로에서 발생했는지 보여준다. JSONL에서는 줄바꿈이 escape되므로 긴 traceback도 하나의 실행 record가 한 물리적 줄을 유지한다. `except Exception`은 일반적인 작업 오류를 처리하되 `KeyboardInterrupt`나 `SystemExit` 같은 process 제어 신호까지 강제로 변환하지 않는다.
 

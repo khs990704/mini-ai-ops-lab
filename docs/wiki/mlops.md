@@ -13,19 +13,19 @@ Mini AI Ops Lab은 단순한 학습 스크립트를 운영 가능한 작업으�
 - `src/train_job.py`
 - `src/run_job.py`
 - `src/config_loader.py`
+- `src/list_runs.py`
 - `src/storage.py`
 - `configs/train.yaml`
 - `logs/runs.jsonl`
 - `artifacts/`
 - `docs/architecture.md`
-- `configs/train.yaml`
 
 ### 프로젝트 디렉터리 역할
 
 | 디렉터리 | 역할 | 현재 또는 예정 내용 |
 |---|---|---|
 | `configs/` | 코드 수정 없이 실행 방식을 바꾸는 설정 보관 | 현재 `train.yaml`; 향후 `tools.yaml` |
-| `src/` | 프로젝트의 실제 동작을 구현하는 소스 코드 보관 | 현재 `train_job.py`, `run_job.py`, `storage.py`; 향후 `tool_runner.py` |
+| `src/` | 프로젝트의 실제 동작을 구현하는 소스 코드 보관 | 현재 학습·저장·조회 script; 향후 `tool_runner.py` |
 | `logs/` | 실행 과정, 성공·실패 상태, Agent 도구 호출 기록 | 현재 `runs.jsonl`; 향후 `errors.jsonl`, `audit.jsonl` |
 | `artifacts/` | 학습 실행이 만든 결과물 보관 | 현재 실행별 `model.pkl`; 향후 설정 사본과 추가 결과 파일 |
 
@@ -41,6 +41,8 @@ src/run_job.py
     ├── src/storage.py로 model 저장
     ├── logs/에 실행 기록
     └── artifacts/에 실행 결과물
+             ↓
+src/list_runs.py로 최근 실험 비교
 ```
 
 ### Day 2 기본 학습 작업
@@ -133,15 +135,36 @@ max_iterations: 200
 
 검증을 통과한 설정만 `train_job.py`에 전달한다. `run_job.py`는 지정 경로와 실제 사용값을 `config_path`, `config`로 run log에 함께 저장한다. 설정 파일이 나중에 바뀌어도 해당 run에 사용된 값은 로그에서 확인할 수 있다.
 
+### Day 9 experiment tracking과 model traceability
+
+Day 9에서는 `experiment_name`을 추가해 같은 목적의 여러 run을 묶는다.
+
+```text
+experiment_name: iris-baseline
+├── run_id A → parameters, metrics, artifact A
+├── run_id B → parameters, metrics, artifact B
+└── run_id C → parameters, metrics, artifact C
+```
+
+- `experiment_name`: 같은 목적의 실행을 묶는 label이며 중복될 수 있음
+- `run_id`: 개별 학습 실행 한 번을 구분하는 고유 식별자
+- `parameters`: model 학습 전에 정한 `test_size`, `random_state`, `max_iterations`
+- `metrics`: 학습 후 계산된 accuracy와 sample 수
+- `artifact_path`: 해당 run이 만든 model 위치
+
+`config`는 검증된 설정 전체를 보존하고, `experiment_name`과 `parameters`는 비교 도구가 중첩 구조를 매번 해석하지 않도록 최상위 field에도 기록한다. 성공과 실패가 같은 experiment에 속하면 실패 record에도 검증 완료 parameter가 남는다. 설정 검증 자체가 실패했다면 실험과 parameter를 확정할 수 없어 `null`이다.
+
 ## 알아둘 명령어나 코드
 
 ```bash
 python src/train_job.py --config configs/train.yaml
 python src/run_job.py --config configs/train.yaml
+python src/list_runs.py --limit 5
+python src/list_runs.py --experiment iris-baseline --limit 3
 find artifacts -maxdepth 2 -type f -name 'model.pkl' -printf '%p %s bytes\n' | sort
 ```
 
-첫 번째 명령은 학습과 artifact 저장을 직접 실행한다. 두 번째 명령은 같은 작업을 실행하고 성공 결과를 `logs/runs.jsonl`에도 추가하는 운영 진입점이다. 세 번째 명령은 저장된 model 경로와 크기를 읽기만 한다.
+첫 번째 명령은 학습과 artifact 저장을 직접 실행한다. 두 번째 명령은 같은 작업을 실행하고 성공 결과를 `logs/runs.jsonl`에도 추가하는 운영 진입점이다. 다음 두 명령은 전체 또는 지정한 experiment의 최근 run을 읽기만 한다. 마지막 명령은 저장된 model 경로와 크기를 읽기만 한다.
 
 ## 흔한 실패 사례
 
@@ -161,6 +184,10 @@ find artifacts -maxdepth 2 -type f -name 'model.pkl' -printf '%p %s bytes\n' | s
 - 증상: 이전 실행의 model 파일이 사라지고 최신 결과만 남음
 - 확인할 것: run ID가 매번 새로 생성되는지, `artifacts/{run_id}/` 구조인지 확인
 - 복구 방법: 실행별 고유 run ID 디렉터리를 만들고 기존 디렉터리가 있으면 저장을 거부함
+- 실패: experiment 이름을 개별 model version처럼 사용함
+- 증상: 같은 이름의 여러 model 중 어느 결과를 뜻하는지 구분할 수 없음
+- 확인할 것: `experiment_name`뿐 아니라 각 record의 `run_id`와 `artifact_path`
+- 복구 방법: experiment 이름은 grouping에 사용하고 개별 실행과 model은 run ID로 식별함
 
 ## 실용적인 이해
 
@@ -169,6 +196,8 @@ find artifacts -maxdepth 2 -type f -name 'model.pkl' -printf '%p %s bytes\n' | s
 Python 파일에 함수를 정의하는 것만으로는 함수가 실행되지 않는다. `python src/train_job.py`처럼 파일을 직접 실행했을 때 학습을 시작하려면 `if __name__ == "__main__":` 진입점에서 `main()`을 호출해야 한다. Day 2에서는 이 진입점이 `train_model()`을 실행하고 metrics를 JSON 한 줄로 출력한다.
 
 run ID는 model 파일 이름만으로 알 수 없는 실행 단위를 표현한다. 현재 같은 run ID가 run log의 설정·metric·상태·artifact 경로를 연결하므로 어떤 조건이 해당 model을 만들었는지 추적할 수 있다.
+
+Experiment tracking은 단순히 실행 횟수를 세는 기능이 아니다. 어떤 조건으로 실행했고 어떤 metric이 나왔으며 어느 model 파일을 만들었는지를 같은 record로 연결해야 비교와 추적이 가능하다. `iris-baseline`이라는 이름이 같아도 run ID가 다르면 별도의 실행과 model이다.
 
 설정을 코드 밖으로 옮기면 Python source를 수정하지 않고 실험 조건을 바꿀 수 있다. 다만 YAML이라는 형식만 사용한다고 안전해지는 것은 아니다. 잘못된 비율이나 오타 난 항목으로 비싼 학습을 시작하지 않도록 실행 경계에서 값을 검증해야 한다.
 
@@ -186,6 +215,8 @@ run ID는 model 파일 이름만으로 알 수 없는 실행 단위를 표현한
   답변: 맞다. 다만 날짜별 작업을 단순 복사한 것이 아니라, 첫 주에 만든 학습·저장·로그·실패 처리·Docker 기능이 현재 하나의 시스템으로 어떻게 연결되는지 구성요소 책임과 흐름 중심으로 정리한 문서다.
 - 질문: `config_loader.py`는 `train.yaml`의 config 값을 불러오면서 조건에 맞는지도 확인하는가?
   답변: 맞다. YAML을 읽고 필수·추가 항목, 자료형과 값 범위를 검사한 뒤 검증된 설정만 반환한다. 조건에 맞지 않으면 학습을 시작하기 전에 오류를 발생시킨다.
+- 질문: `experiment_name`은 학습 식별 이름인가?
+  답변: 같은 목적의 학습 실행들을 묶는 식별 이름이다. 개별 실행 한 번은 고유한 `run_id`로 구분한다. 하나의 `experiment_name` 아래 여러 run과 model artifact가 존재할 수 있다.
 
 ## 관련 문서
 

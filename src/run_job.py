@@ -22,6 +22,7 @@ else:
 
 
 RUN_LOG_PATH = Path("logs/runs.jsonl")
+TRAINING_PARAMETER_KEYS = ("test_size", "random_state", "max_iterations")
 
 
 def utc_now_iso() -> str:
@@ -68,10 +69,15 @@ def run_training_job(
     started_at = utc_now_iso()
     started_counter = perf_counter()
     config = None
+    experiment_name = None
+    parameters = None
 
     try:
         # 검증된 설정만 학습에 전달하고 실제 사용값을 실행 기록에 남긴다.
         config = load_train_config(config_path)
+        experiment_name = config["experiment_name"]
+        # 비교에 필요한 학습값만 분리해 config 전체를 해석하지 않고 조회할 수 있게 한다.
+        parameters = {key: config[key] for key in TRAINING_PARAMETER_KEYS}
 
         if force_failure:
             # 외부 환경을 손상시키지 않고 같은 실패를 반복해 처리 경로를 검증한다.
@@ -90,6 +96,8 @@ def run_training_job(
             "artifact_path": str(artifact_path),
             "config_path": str(config_path),
             "config": config,
+            "experiment_name": experiment_name,
+            "parameters": parameters,
             "error_type": None,
             "error_message": None,
             "traceback": None,
@@ -106,6 +114,8 @@ def run_training_job(
             "artifact_path": None,
             "config_path": str(config_path),
             "config": config,
+            "experiment_name": experiment_name,
+            "parameters": parameters,
             "error_type": type(error).__name__,
             "error_message": str(error),
             "traceback": traceback.format_exc(),

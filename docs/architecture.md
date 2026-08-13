@@ -6,7 +6,7 @@ Mini AI Ops Lab은 작은 머신러닝 학습 작업을 실행 가능한 script�
 
 ## 현재 구현 범위
 
-Day 9까지 구현된 범위는 다음과 같다.
+Day 10까지 구현된 범위는 다음과 같다.
 
 - Iris 분류 model 학습과 accuracy 계산
 - 실행별 고유 run ID 생성
@@ -20,6 +20,8 @@ Day 9까지 구현된 범위는 다음과 같다.
 - `experiment_name`으로 같은 목적의 run grouping
 - parameter, metric과 artifact를 한 record에서 비교
 - 최근 run 목록과 실험 이름 filter
+- 원본과 재현 success run의 조건·결과·artifact 비교
+- 같은 Docker image를 사용하는 이전 run 재현 절차
 
 Agent tool runner, audit log와 timeout은 이후 작업 범위이며 현재 실행 흐름에는 포함되지 않는다.
 
@@ -56,6 +58,10 @@ Local Python 또는 Docker container
           ▼
   src/list_runs.py
   최근 run 조회와 비교
+          │
+          ▼
+ src/compare_runs.py
+ 원본·재현 run 비교
 ```
 
 Local과 Docker는 별도의 학습 구현을 사용하지 않는다. 두 실행환경 모두 같은 `src/run_job.py`를 진입점으로 사용한다.
@@ -68,6 +74,7 @@ Local과 Docker는 별도의 학습 구현을 사용하지 않는다. 두 실행
 | `src/config_loader.py` | YAML 읽기, 필수·추가 항목과 자료형·값 범위 검증 | 학습 실행, log 기록 |
 | `src/run_job.py` | run ID 생성, 설정 로드, 비교 field 구성, 학습·저장 조정, 성공·실패 log와 exit code 반환 | 학습 알고리즘 구현, model 직렬화 세부 처리 |
 | `src/list_runs.py` | 최근 run을 최신순으로 조회하고 experiment 이름으로 filter | 학습 실행, log 수정 |
+| `src/compare_runs.py` | 두 success run의 experiment, parameter, metric과 artifact 존재 여부 비교 | 학습 실행, record나 model 수정 |
 | `src/train_job.py` | 검증된 설정에 따른 Iris data 분리, `LogisticRegression` 학습, accuracy와 sample 수 계산 | 운영 상태와 traceback 기록 |
 | `src/storage.py` | 고유 run ID 생성, run별 디렉터리 생성, pickle model 저장 | 학습 실행과 log schema 관리 |
 | `logs/runs.jsonl` | 모든 run의 상태, 시각, metric, artifact 경로와 오류 정보 누적 | model 객체 보관 |
@@ -131,6 +138,27 @@ experiment_name filter
 
 `src/list_runs.py`는 원본 JSONL을 수정하지 않는다. Day 9 field가 없는 과거 record는 없는 값을 `-`로 표시하고, 기존 `config`에 parameter가 있으면 비교 열을 보완한다. 손상된 JSON line은 경고 후 건너뛰어 나머지 운영 기록을 계속 조회한다.
 
+## 이전 run 재현 흐름
+
+```text
+원본 success run
+  ├── 기록된 config, parameters, metrics
+  └── 기존 model artifact
+              ↓
+같은 Docker image와 설정으로 학습
+              ↓
+새 run ID와 새 model artifact
+              ↓
+src/compare_runs.py
+  ├── 같아야 함: experiment, parameters, metrics
+  ├── 존재해야 함: 원본·재현 artifact
+  └── 달라야 함: run ID와 artifact 경로
+```
+
+`compare_runs.py`는 두 success record와 artifact 경로를 읽기만 한다. 모든 현재 기준을 만족하면 `reproduced: true`와 exit code `0`, 값 불일치나 artifact 누락은 exit code `1`을 반환한다. Failed run이나 존재하지 않는 run은 결과를 비교할 수 없으므로 명확한 오류로 거부한다.
+
+이번 재현은 원본 `20260812T004148291974Z-e2bef42e`와 같은 `mini-ai-ops-lab:day9` image 및 설정으로 새 run `20260813T050336148461Z-c104baf9`를 생성해 검증했다. Parameter와 metric은 같았으며 두 model은 서로 다른 run별 경로에 보존됐다.
+
 ## 실행환경 경계
 
 ### Local Python
@@ -140,6 +168,7 @@ Local virtual environment에 `requirements.txt` dependency를 설치하고 프�
 ```bash
 python src/run_job.py --config configs/train.yaml
 python src/list_runs.py --experiment iris-baseline --limit 3
+python src/compare_runs.py --source-run 20260812T004148291974Z-e2bef42e --candidate-run 20260813T050336148461Z-c104baf9
 ```
 
 ### Docker
@@ -159,6 +188,9 @@ Docker image는 Python 3.12, dependency, `src/`, `configs/`와 기본 명령을 
 - Experiment name은 grouping label이며 같은 이름의 여러 run을 허용한다. 이름 자체가 개별 model version은 아니다.
 - Day 9 이전 log에는 `experiment_name`과 `parameters`가 없을 수 있으며 조회 시 호환 표시만 제공하고 원본 record를 변경하지 않는다.
 - Run log는 설정 파일의 원문이나 hash 대신 검증된 설정값과 지정 경로를 기록한다.
+- Run record는 Git commit, Docker image digest와 data version을 기록하지 않아 config만으로 장기적인 완전 재현을 보장하지 못한다.
+- Docker tag는 같은 이름으로 다시 build할 수 있으므로 불변 image 식별자가 아니다.
+- 현재 재현 비교는 metric의 정확한 일치와 artifact 존재 여부를 확인하며 model byte나 전체 예측 결과는 비교하지 않는다.
 - `logs/runs.jsonl` append는 현재 단일 process 실행을 전제로 하며 동시 쓰기 제어가 없다.
 - `running` 중간 상태는 기록하지 않고 실행 종료 후 `success` 또는 `failed` 한 줄만 기록한다.
 - Log 파일 쓰기 자체가 실패하면 같은 파일에 그 오류를 기록할 수 없다.
@@ -176,7 +208,9 @@ configs/train.yaml
        ↓
 experiment 이름과 run 결과 비교
        ↓
-이전 run의 재현 명령과 runbook 작성
+이전 run의 재현 명령과 runbook
+       ↓
+code·image·data version 추적 강화
 
 configs/tools.yaml
        ↓
@@ -191,5 +225,6 @@ timeout과 logs/audit.jsonl
 - [프로젝트 계획](project-plan.md)
 - [일별 작업 흐름](daily-codex-workflow.md)
 - [장애 시나리오](failure-scenarios.md)
+- [Runbook](runbook.md)
 - [기술 위키](wiki/README.md)
 - [작업 일지](work-logs/README.md)

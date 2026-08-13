@@ -14,11 +14,13 @@ Mini AI Ops Lab은 단순한 학습 스크립트를 운영 가능한 작업으�
 - `src/run_job.py`
 - `src/config_loader.py`
 - `src/list_runs.py`
+- `src/compare_runs.py`
 - `src/storage.py`
 - `configs/train.yaml`
 - `logs/runs.jsonl`
 - `artifacts/`
 - `docs/architecture.md`
+- `docs/runbook.md`
 
 ### 프로젝트 디렉터리 역할
 
@@ -43,6 +45,8 @@ src/run_job.py
     └── artifacts/에 실행 결과물
              ↓
 src/list_runs.py로 최근 실험 비교
+             ↓
+src/compare_runs.py로 재현 run 비교
 ```
 
 ### Day 2 기본 학습 작업
@@ -154,6 +158,28 @@ experiment_name: iris-baseline
 
 `config`는 검증된 설정 전체를 보존하고, `experiment_name`과 `parameters`는 비교 도구가 중첩 구조를 매번 해석하지 않도록 최상위 field에도 기록한다. 성공과 실패가 같은 experiment에 속하면 실패 record에도 검증 완료 parameter가 남는다. 설정 검증 자체가 실패했다면 실험과 parameter를 확정할 수 없어 `null`이다.
 
+### Day 10 이전 run 재현
+
+재현은 과거 record를 새 schema로 수정하는 작업이 아니다. 성공한 원본 run을 그대로 보존하고 같은 조건의 새 run을 만든 뒤 결과를 비교한다.
+
+```text
+원본 success run
+       ↓ 기록된 config와 artifact 확인
+같은 Docker image와 설정으로 새 run 생성
+       ↓
+experiment, parameters, metrics와 artifact 비교
+```
+
+현재 프로젝트의 `src/compare_runs.py`는 다음을 재현 성공 기준으로 사용한다.
+
+- Experiment 이름, parameter와 metric이 같다.
+- 원본과 재현 model artifact가 모두 존재한다.
+- 새 실행이므로 run ID와 artifact 경로는 서로 다르다.
+
+실행 시각과 duration은 비교하지 않는다. Model byte와 모든 예측 결과도 아직 비교하지 않는다. Day 10에서는 원본 `20260812T004148291974Z-e2bef42e`와 재현 run `20260813T050336148461Z-c104baf9`가 현재 기준을 모두 통과했다.
+
+같은 config는 재현에 필요하지만 항상 충분하지는 않다. Data, code commit, dependency, Docker image digest, hardware와 비결정적 연산도 결과에 영향을 줄 수 있다. 현재 run record는 이 환경 정보를 모두 저장하지 않으므로 이번 검증은 남아 있던 같은 Day 9 image와 같은 설정에서 metric이 반복됐다는 증거다.
+
 ## 알아둘 명령어나 코드
 
 ```bash
@@ -161,10 +187,11 @@ python src/train_job.py --config configs/train.yaml
 python src/run_job.py --config configs/train.yaml
 python src/list_runs.py --limit 5
 python src/list_runs.py --experiment iris-baseline --limit 3
+python src/compare_runs.py --source-run 20260812T004148291974Z-e2bef42e --candidate-run 20260813T050336148461Z-c104baf9
 find artifacts -maxdepth 2 -type f -name 'model.pkl' -printf '%p %s bytes\n' | sort
 ```
 
-첫 번째 명령은 학습과 artifact 저장을 직접 실행한다. 두 번째 명령은 같은 작업을 실행하고 성공 결과를 `logs/runs.jsonl`에도 추가하는 운영 진입점이다. 다음 두 명령은 전체 또는 지정한 experiment의 최근 run을 읽기만 한다. 마지막 명령은 저장된 model 경로와 크기를 읽기만 한다.
+첫 번째 명령은 학습과 artifact 저장을 직접 실행한다. 두 번째 명령은 같은 작업을 실행하고 성공 결과를 `logs/runs.jsonl`에도 추가하는 운영 진입점이다. 다음 두 명령은 전체 또는 지정한 experiment의 최근 run을 읽기만 한다. `compare_runs.py`는 두 success run의 현재 재현 기준을 읽기 전용으로 검사한다. 마지막 명령은 저장된 model 경로와 크기를 읽기만 한다.
 
 ## 흔한 실패 사례
 
@@ -188,6 +215,10 @@ find artifacts -maxdepth 2 -type f -name 'model.pkl' -printf '%p %s bytes\n' | s
 - 증상: 같은 이름의 여러 model 중 어느 결과를 뜻하는지 구분할 수 없음
 - 확인할 것: `experiment_name`뿐 아니라 각 record의 `run_id`와 `artifact_path`
 - 복구 방법: experiment 이름은 grouping에 사용하고 개별 실행과 model은 run ID로 식별함
+- 실패: config는 같지만 metric이 다름
+- 증상: `metrics_match: false`와 exit code `1`이 반환됨
+- 확인할 것: data, code commit, dependency, Docker image, random seed와 hardware 차이
+- 복구 방법: 원본 run의 config뿐 아니라 실행환경 version을 확인하고 차이를 제거한 뒤 새 run으로 다시 검증함
 
 ## 실용적인 이해
 
@@ -198,6 +229,8 @@ Python 파일에 함수를 정의하는 것만으로는 함수가 실행되지 �
 run ID는 model 파일 이름만으로 알 수 없는 실행 단위를 표현한다. 현재 같은 run ID가 run log의 설정·metric·상태·artifact 경로를 연결하므로 어떤 조건이 해당 model을 만들었는지 추적할 수 있다.
 
 Experiment tracking은 단순히 실행 횟수를 세는 기능이 아니다. 어떤 조건으로 실행했고 어떤 metric이 나왔으며 어느 model 파일을 만들었는지를 같은 record로 연결해야 비교와 추적이 가능하다. `iris-baseline`이라는 이름이 같아도 run ID가 다르면 별도의 실행과 model이다.
+
+실제 MLOps에서도 run 비교 기능은 필요하지만 파일 이름이 `compare_runs.py`일 필요는 없다. MLflow나 다른 experiment tracking platform이 parameter, metric과 artifact 비교를 대신할 수 있다. 이 프로젝트는 외부 platform 없이 그 핵심 동작을 이해하기 위해 작은 Python script로 직접 구현했다.
 
 설정을 코드 밖으로 옮기면 Python source를 수정하지 않고 실험 조건을 바꿀 수 있다. 다만 YAML이라는 형식만 사용한다고 안전해지는 것은 아니다. 잘못된 비율이나 오타 난 항목으로 비싼 학습을 시작하지 않도록 실행 경계에서 값을 검증해야 한다.
 
@@ -217,6 +250,12 @@ Experiment tracking은 단순히 실행 횟수를 세는 기능이 아니다. �
   답변: 맞다. YAML을 읽고 필수·추가 항목, 자료형과 값 범위를 검사한 뒤 검증된 설정만 반환한다. 조건에 맞지 않으면 학습을 시작하기 전에 오류를 발생시킨다.
 - 질문: `experiment_name`은 학습 식별 이름인가?
   답변: 같은 목적의 학습 실행들을 묶는 식별 이름이다. 개별 실행 한 번은 고유한 `run_id`로 구분한다. 하나의 `experiment_name` 아래 여러 run과 model artifact가 존재할 수 있다.
+- 질문: Day 10은 config 이전의 과거 run을 새 schema로 수정하는 작업인가?
+  답변: 아니다. Config가 기록된 기존 success run은 그대로 보존하고 같은 조건으로 새 run을 만든 뒤 두 결과를 비교한다. Config가 없는 더 오래된 run은 현재 정보만으로 정확하게 재현하기 어렵다.
+- 질문: 같은 config라면 같은 결과가 나와야 하는가?
+  답변: 현재의 결정적인 Iris 학습에서는 같은 결과를 기대하지만 일반적으로는 data, code, dependency, hardware와 비결정적 연산도 영향을 준다. 같은 config는 필요하지만 완전 재현의 충분조건은 아니다.
+- 질문: `compare_runs.py`가 실제 MLOps에서도 필요한가?
+  답변: 이 파일 자체는 표준 필수 파일이 아니다. 다만 run의 parameter, metric과 artifact를 비교하는 기능은 MLOps의 핵심이며 실제 환경에서는 MLflow 같은 platform이 대신할 수 있다.
 
 ## 관련 문서
 
@@ -224,4 +263,5 @@ Experiment tracking은 단순히 실행 횟수를 세는 기능이 아니다. �
 - [일별 작업 흐름](../daily-codex-workflow.md)
 - [프로젝트 README](../../README.md)
 - [Architecture](../architecture.md)
+- [Runbook](../runbook.md)
 - [로깅과 모니터링](logging-monitoring.md)

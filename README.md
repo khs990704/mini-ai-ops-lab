@@ -26,6 +26,9 @@ src/train_job.py     src/storage.py
                ↓
         src/list_runs.py
        최근 실험 결과 비교
+               ↓
+       src/compare_runs.py
+       원본·재현 run 비교
 ```
 
 `src/run_job.py`가 학습과 저장을 조정하고 성공·실패 record를 남긴다. 상세한 구성요소 책임과 실행 sequence는 [Architecture](docs/architecture.md)에서 확인할 수 있다.
@@ -42,6 +45,8 @@ src/train_job.py     src/storage.py
 - 실행 log의 설정 경로와 실제 사용값 기록
 - 실험 이름별 run grouping과 parameter·metric 비교
 - 최근 run 목록 및 실험 이름 filter
+- 이전 run의 재실행 및 재현 결과 비교
+- 재현 절차를 설명하는 운영 runbook
 - 오류 종류, 메시지와 traceback 기록
 - Local Python 및 Docker container 실행
 - 제어된 학습 실패와 복구 확인 절차
@@ -51,7 +56,7 @@ src/train_job.py     src/storage.py
 
 - allowlist 기반 Agent 도구 실행
 - 도구 timeout 및 audit log
-- 운영 runbook과 보안·백업 체크리스트
+- runbook 확장과 보안·백업 체크리스트
 - 추가 장애 시나리오와 log retention
 
 ## 시작 방법
@@ -192,6 +197,32 @@ python src/list_runs.py --experiment iris-baseline --limit 3
 
 두 명령은 run log를 읽기만 한다. 첫 번째는 전체 최근 run을, 두 번째는 `iris-baseline`의 최근 run만 최신순으로 출력한다. Day 9 이전 record에 새 field가 없으면 `-`로 표시하고, 기존 `config`에 parameter가 있으면 비교 열을 보완한다.
 
+## 이전 Run 재현
+
+재현은 기존 run을 수정하는 작업이 아니다. 성공한 원본 run의 설정과 실행환경을 확인하고 같은 조건으로 새 run을 만든 뒤 결과를 비교한다.
+
+```text
+원본 success run 선택
+        ↓
+기록된 config와 artifact 확인
+        ↓
+같은 Docker image와 설정으로 새 run 생성
+        ↓
+experiment, parameters, metrics와 artifact 비교
+```
+
+Day 10에서는 다음 명령으로 원본과 재현 run을 비교했다.
+
+```bash
+python src/compare_runs.py \
+  --source-run 20260812T004148291974Z-e2bef42e \
+  --candidate-run 20260813T050336148461Z-c104baf9
+```
+
+이 명령은 log와 artifact 경로를 읽기만 한다. Experiment 이름, parameter와 metric이 같고 두 model이 존재하며, run ID와 artifact 경로가 서로 다르면 `reproduced: true`와 exit code `0`을 반환한다.
+
+같은 config만으로 일반적인 머신러닝의 완전한 재현이 보장되지는 않는다. 현재 run record에는 Git commit, Docker image digest와 data version이 없으며 model byte나 모든 예측 결과도 비교하지 않는다. 실제 선택·재실행·비교 절차와 실패 항목별 대응은 [Runbook](docs/runbook.md)에서 확인한다.
+
 ## 향후 구현: Agent 도구 실행기
 
 향후 `configs/tools.yaml`과 `src/tool_runner.py`를 추가한다. 도구 실행기는 allowlist에 정의된 도구만 허용하고, 등록되지 않은 요청을 거부하며, 허용된 실행에도 timeout을 적용할 계획이다.
@@ -235,7 +266,7 @@ python src/list_runs.py --limit 3
 
 현재는 제어된 학습 실패의 증상, log 확인과 정상 실행을 통한 복구 절차를 문서화했다. 설정 파일이 없거나 조건이 잘못된 경우도 학습 전에 실패로 기록한다. Artifact 저장 실패, 도구 timeout, 허용되지 않은 도구 요청과 과도한 log 증가는 관련 기능을 구현하면서 추가한다.
 
-현재 구현한 학습 실패 재현과 복구 확인 절차는 [장애 시나리오](docs/failure-scenarios.md)에서 확인할 수 있다.
+현재 구현한 학습 실패 재현과 복구 확인 절차는 [장애 시나리오](docs/failure-scenarios.md), 이전 성공 run의 재실행 절차는 [Runbook](docs/runbook.md)에서 확인할 수 있다.
 
 ## 보안과 백업 고려사항
 

@@ -2,11 +2,11 @@
 
 ## 목적
 
-Mini AI Ops Lab은 작은 머신러닝 학습 작업을 실행 가능한 script에서 추적 가능한 운영 job으로 발전시키는 프로젝트다. 현재 architecture는 model 정확도 개선보다 설정 검증, 실험과 실행 식별, 결과 비교, 성공·실패 기록과 재현 가능한 실행환경에 집중한다.
+Mini AI Ops Lab은 작은 머신러닝 학습 작업을 추적 가능한 운영 job으로 발전시키고 Agent의 Tool 요청을 제한하는 프로젝트다. 현재 architecture는 model 정확도 개선보다 설정 검증, 실행 추적, 재현성과 최소 권한의 실행 경계에 집중한다.
 
 ## 현재 구현 범위
 
-Day 10까지 구현된 범위는 다음과 같다.
+Day 11까지 구현된 범위는 다음과 같다.
 
 - Iris 분류 model 학습과 accuracy 계산
 - 실행별 고유 run ID 생성
@@ -22,8 +22,11 @@ Day 10까지 구현된 범위는 다음과 같다.
 - 최근 run 목록과 실험 이름 filter
 - 원본과 재현 success run의 조건·결과·artifact 비교
 - 같은 Docker image를 사용하는 이전 run 재현 절차
+- `configs/tools.yaml`의 네 Tool과 최소 접근 범위 정의
+- 공통 Tool allowlist의 구조, 권한 값과 resource 경로 검증
+- Local 및 Docker의 Tool 설정 로드
 
-Agent tool runner, audit log와 timeout은 이후 작업 범위이며 현재 실행 흐름에는 포함되지 않는다.
+Agent Tool의 실제 허용·거부와 실행, audit log 및 timeout은 이후 작업 범위이며 현재 실행 흐름에는 포함되지 않는다.
 
 ## 시스템 구성
 
@@ -62,6 +65,20 @@ Local Python 또는 Docker container
           ▼
  src/compare_runs.py
  원본·재현 run 비교
+
+향후 Agent의 Tool 요청
+          │
+          ▼
+ configs/tools.yaml
+ 공통 Tool allowlist
+          │
+          ▼
+src/tool_config_loader.py
+ 구조·권한·resource 검증
+          │
+          ▼
+src/tool_runner.py (Day 12)
+ 요청 허용·거부와 handler 실행
 ```
 
 Local과 Docker는 별도의 학습 구현을 사용하지 않는다. 두 실행환경 모두 같은 `src/run_job.py`를 진입점으로 사용한다.
@@ -75,6 +92,9 @@ Local과 Docker는 별도의 학습 구현을 사용하지 않는다. 두 실행
 | `src/run_job.py` | run ID 생성, 설정 로드, 비교 field 구성, 학습·저장 조정, 성공·실패 log와 exit code 반환 | 학습 알고리즘 구현, model 직렬화 세부 처리 |
 | `src/list_runs.py` | 최근 run을 최신순으로 조회하고 experiment 이름으로 filter | 학습 실행, log 수정 |
 | `src/compare_runs.py` | 두 success run의 experiment, parameter, metric과 artifact 존재 여부 비교 | 학습 실행, record나 model 수정 |
+| `configs/tools.yaml` | 허용할 Tool, 입력 형태, 영향 수준과 접근 resource 정의 | 실제 요청 검증, Tool 실행 |
+| `src/tool_config_loader.py` | Tool allowlist의 schema, 값과 상대 resource 경로 검증 | Agent 식별, Tool 요청 허용·실행 |
+| `src/tool_runner.py` | Day 12에서 allowlist 기반 요청 dispatch 예정 | Day 11 현재는 존재하지 않음 |
 | `src/train_job.py` | 검증된 설정에 따른 Iris data 분리, `LogisticRegression` 학습, accuracy와 sample 수 계산 | 운영 상태와 traceback 기록 |
 | `src/storage.py` | 고유 run ID 생성, run별 디렉터리 생성, pickle model 저장 | 학습 실행과 log schema 관리 |
 | `logs/runs.jsonl` | 모든 run의 상태, 시각, metric, artifact 경로와 오류 정보 누적 | model 객체 보관 |
@@ -159,6 +179,22 @@ src/compare_runs.py
 
 이번 재현은 원본 `20260812T004148291974Z-e2bef42e`와 같은 `mini-ai-ops-lab:day9` image 및 설정으로 새 run `20260813T050336148461Z-c104baf9`를 생성해 검증했다. Parameter와 metric은 같았으며 두 model은 서로 다른 run별 경로에 보존됐다.
 
+## Agent Tool Allowlist 경계
+
+```text
+Agent: 필요한 Tool을 판단하고 이름으로 요청
+                 ↓
+Tool Runner: tools.yaml 등록 여부와 입력 확인
+                 ↓
+Tool: 허용된 project 기능만 실행
+```
+
+Day 11의 `configs/tools.yaml`은 `echo`, `list_artifacts`, `read_log_summary`, `run_train_job` 네 이름만 실행 후보로 정의한다. `none`, `read`, `write`는 Tool이 미칠 수 있는 가장 높은 영향 수준을 나타내며 `resources`는 의도한 접근 범위를 설명한다.
+
+`tool_config_loader.py`는 필수·추가 field, Tool 이름, 입력 형태, 접근 수준과 resource가 project 내부 상대 경로인지 검증한다. 그러나 설정과 loader만으로 요청을 차단하거나 OS 권한을 적용하지는 않는다. 실제 통제는 Day 12의 runner가 allowlist에 없는 이름을 거부하고 미리 작성된 handler만 호출할 때 만들어진다.
+
+현재는 Agent identity가 없는 단일 실행환경이므로 모든 요청이 같은 공통 allowlist를 사용한다. 여러 Agent의 역할이 실제로 나뉘면 Agent 또는 role별 최소 권한 목록으로 확장할 수 있다.
+
 ## 실행환경 경계
 
 ### Local Python
@@ -169,6 +205,7 @@ Local virtual environment에 `requirements.txt` dependency를 설치하고 프�
 python src/run_job.py --config configs/train.yaml
 python src/list_runs.py --experiment iris-baseline --limit 3
 python src/compare_runs.py --source-run 20260812T004148291974Z-e2bef42e --candidate-run 20260813T050336148461Z-c104baf9
+python src/tool_config_loader.py --config configs/tools.yaml
 ```
 
 ### Docker
@@ -198,6 +235,9 @@ Docker image는 Python 3.12, dependency, `src/`, `configs/`와 기본 명령을 
 - `requirements.txt`는 호환 version 범위이므로 미래 image rebuild의 package 조합까지 완전히 고정하지 않는다.
 - Pickle은 신뢰하는 프로젝트 artifact만 사용하며 가능한 한 생성한 실행환경에서 불러온다.
 - 현재 log와 artifact는 Git에서 제외되며 별도의 backup·retention 정책은 아직 없다.
+- Tool allowlist는 현재 모든 요청에 공통이며 Agent별 role과 identity를 구분하지 않는다.
+- Tool의 `access`와 `resources`는 검증된 정책 metadata이며 아직 요청 차단이나 OS 권한을 직접 강제하지 않는다.
+- `tool_runner.py`와 `logs/audit.jsonl`이 아직 없어 Tool은 실행되지 않고 요청 이력도 기록되지 않는다.
 
 이 제약은 현재 학습용 단일 job 범위를 명확히 하기 위한 것이다. 동시성, 장기 보존을 위한 설정 원본 관리, backup과 Agent 실행 통제는 이후 작업에서 단계적으로 추가한다.
 

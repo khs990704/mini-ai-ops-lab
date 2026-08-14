@@ -1,0 +1,29 @@
+# 설정에 등록된 논리적 도구만 실행 후보가 되도록 allowlist를 정의한다.
+tools:
+  echo:
+    description: 입력 문자열을 변경 없이 반환한다.
+    input_type: text
+    access: none
+    resources: []
+
+  list_artifacts:
+    description: 저장된 model artifact 목록을 읽는다.
+    input_type: "none"
+    access: read
+    resources:
+      - artifacts/
+
+  read_log_summary:
+    description: 최근 학습 run의 상태와 결과를 요약해 읽는다.
+    input_type: "none"
+    access: read
+    resources:
+      - logs/runs.jsonl
+
+  run_train_job:
+    description: 기본 설정으로 학습을 실행하고 log와 artifact를 생성한다.
+    input_type: "none"
+    access: write
+    resources:
+      - logs/runs.jsonl
+      - artifacts/

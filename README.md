@@ -2,7 +2,7 @@
 
 ## 프로젝트 소개
 
-Mini AI Ops Lab은 AI 작업을 운영하는 방법을 배우기 위한 작고 이해하기 쉬운 시스템이다. 현재는 학습 작업을 실행하고, 성공과 실패 결과를 기록하며, model artifact를 실행별로 저장한다. 이후 Agent 도구 호출을 allowlist, timeout과 audit log로 통제하는 기능까지 확장한다.
+Mini AI Ops Lab은 AI 작업을 운영하는 방법을 배우기 위한 작고 이해하기 쉬운 시스템이다. 현재는 학습 작업과 실험 결과를 추적하고 Agent용 Tool allowlist를 정의·검증한다. 이후 실제 도구 호출을 allowlist, timeout과 audit log로 통제하는 기능까지 확장한다.
 
 이 프로젝트는 모델 정확도보다 추적과 복구 가능성을 중요하게 생각한다. 어떤 설정으로 실행했는지, 성공했는지, 어떤 metric과 artifact가 생성됐는지를 나중에도 확인할 수 있어야 한다.
 
@@ -29,6 +29,15 @@ src/train_job.py     src/storage.py
                ↓
        src/compare_runs.py
        원본·재현 run 비교
+
+Agent의 향후 Tool 요청
+               ↓
+       configs/tools.yaml
+               ↓
+  src/tool_config_loader.py
+       검증된 공통 allowlist
+               ↓
+  src/tool_runner.py (Day 12)
 ```
 
 `src/run_job.py`가 학습과 저장을 조정하고 성공·실패 record를 남긴다. 상세한 구성요소 책임과 실행 sequence는 [Architecture](docs/architecture.md)에서 확인할 수 있다.
@@ -50,11 +59,13 @@ src/train_job.py     src/storage.py
 - 오류 종류, 메시지와 traceback 기록
 - Local Python 및 Docker container 실행
 - 제어된 학습 실패와 복구 확인 절차
+- Agent용 공통 Tool allowlist와 최소 접근 범위 정의
+- Local 및 Docker의 Tool 설정 검증
 - 프로젝트 내부 기술 위키와 날짜별 작업 기록
 
 다음 기능은 향후 작업 범위다.
 
-- allowlist 기반 Agent 도구 실행
+- allowlist 기반 Agent 도구 요청 허용·거부와 실행
 - 도구 timeout 및 audit log
 - runbook 확장과 보안·백업 체크리스트
 - 추가 장애 시나리오와 log retention
@@ -81,7 +92,7 @@ Docker image는 기존 Python 코드를 Docker 전용으로 다시 작성하는 
 프로젝트 root에서 image를 build한다.
 
 ```bash
-docker build -t mini-ai-ops-lab:day9 .
+docker build -t mini-ai-ops-lab:day11 .
 ```
 
 이 명령은 base image와 dependency를 내려받아 local Docker image와 build cache를 만든다. `Dockerfile`, `requirements.txt`, `src/`, `configs/`를 변경했다면 새 내용을 반영하기 위해 다시 build한다.
@@ -89,7 +100,7 @@ docker build -t mini-ai-ops-lab:day9 .
 동작만 확인하고 실행 결과를 버리려면 다음처럼 실행한다.
 
 ```bash
-docker run --rm mini-ai-ops-lab:day9
+docker run --rm mini-ai-ops-lab:day11
 ```
 
 `--rm`은 실행이 끝난 container를 제거한다. 이 명령의 log와 artifact는 container 안에 있으므로 container와 함께 사라지고, build한 image는 유지된다.
@@ -101,7 +112,7 @@ docker run --rm \
   --user "$(id -u):$(id -g)" \
   --mount type=bind,source="$PWD/logs",target=/app/logs \
   --mount type=bind,source="$PWD/artifacts",target=/app/artifacts \
-  mini-ai-ops-lab:day9
+  mini-ai-ops-lab:day11
 ```
 
 - `--user`는 생성 파일의 소유자를 현재 WSL 사용자와 맞춘다.
@@ -116,7 +127,7 @@ docker run --rm \
   --user "$(id -u):$(id -g)" \
   --mount type=bind,source="$PWD/logs",target=/app/logs \
   --mount type=bind,source="$PWD/artifacts",target=/app/artifacts \
-  mini-ai-ops-lab:day9 \
+  mini-ai-ops-lab:day11 \
   python src/run_job.py --fail
 ```
 
@@ -128,7 +139,7 @@ Container에서 host의 최근 실험 기록을 읽기만 하려면 `logs/`를 r
 docker run --rm \
   --user "$(id -u):$(id -g)" \
   --mount type=bind,source="$PWD/logs",target=/app/logs,readonly \
-  mini-ai-ops-lab:day9 \
+  mini-ai-ops-lab:day11 \
   python src/list_runs.py --experiment iris-baseline --limit 3
 ```
 
@@ -223,9 +234,26 @@ python src/compare_runs.py \
 
 같은 config만으로 일반적인 머신러닝의 완전한 재현이 보장되지는 않는다. 현재 run record에는 Git commit, Docker image digest와 data version이 없으며 model byte나 모든 예측 결과도 비교하지 않는다. 실제 선택·재실행·비교 절차와 실패 항목별 대응은 [Runbook](docs/runbook.md)에서 확인한다.
 
-## 향후 구현: Agent 도구 실행기
+## Agent Tool Allowlist
 
-향후 `configs/tools.yaml`과 `src/tool_runner.py`를 추가한다. 도구 실행기는 allowlist에 정의된 도구만 허용하고, 등록되지 않은 요청을 거부하며, 허용된 실행에도 timeout을 적용할 계획이다.
+Agent는 무엇을 할지 판단하고 Tool 사용을 요청하는 주체이며, Tool은 실제 기능이다. `configs/tools.yaml`은 현재 단일 Agent 실행환경에 공통으로 적용할 다음 allowlist를 정의한다.
+
+| Tool | 입력 | 접근 수준 | 허용 resource |
+|---|---|---|---|
+| `echo` | text | `none` | 없음 |
+| `list_artifacts` | 없음 | `read` | `artifacts/` |
+| `read_log_summary` | 없음 | `read` | `logs/runs.jsonl` |
+| `run_train_job` | 없음 | `write` | `logs/runs.jsonl`, `artifacts/` |
+
+다음 명령은 allowlist의 구조, 입력 형태, 접근 수준과 project 내부 상대 resource를 검증한다.
+
+```bash
+python src/tool_config_loader.py --config configs/tools.yaml
+```
+
+이 명령은 설정을 읽기만 하며 Tool을 실행하지 않는다. `access`는 각 Tool이 미칠 수 있는 영향의 분류이며, 설정 파일만으로 OS 파일 권한이 적용되지는 않는다.
+
+Day 11은 Tool 정의와 검증까지만 구현했다. Day 12의 `src/tool_runner.py`가 Agent의 요청 이름을 이 allowlist와 비교해 등록되지 않은 Tool을 거부하고 허용된 Python handler를 실행할 예정이다. 현재는 Agent identity나 role을 구분하지 않으므로 모든 요청에 같은 allowlist가 적용된다.
 
 ## 로그와 감사 기록
 

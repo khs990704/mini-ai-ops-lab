@@ -13,24 +13,27 @@ Agent가 제한 없이 도구를 실행하면 안정성과 보안 문제가 생�
 - `configs/tools.yaml`
 - `src/tool_config_loader.py`
 - `src/tool_runner.py`
-- `src/audit_logger.py`
-- `logs/audit.jsonl`
+- 향후 추가: `src/audit_logger.py`, `logs/audit.jsonl`
 
 ## 알아둘 명령어나 코드
 
-현재 구현된 allowlist 검증 명령은 다음과 같다.
+Allowlist만 검증하는 명령은 다음과 같다.
 
 ```bash
 python src/tool_config_loader.py --config configs/tools.yaml
 ```
 
-이 명령은 설정을 읽고 검증할 뿐 Tool을 실행하지 않는다. Day 12 이후 사용할 예정인 요청 명령은 다음과 같다.
+이 명령은 설정을 읽고 검증할 뿐 Tool을 실행하지 않는다. 실제 요청은 다음과 같이 실행한다.
 
 ```bash
 python src/tool_runner.py --tool echo --input "hello"
+python src/tool_runner.py --tool list_artifacts
+python src/tool_runner.py --tool read_log_summary
+python src/tool_runner.py --tool run_train_job
 python src/tool_runner.py --tool unknown
-tail -n 5 logs/audit.jsonl
 ```
+
+앞의 세 조회 Tool은 project 파일을 변경하지 않는다. `run_train_job`은 새 run log와 model artifact를 생성하며, `unknown`은 실행되지 않고 exit code `1`로 거부된다.
 
 ### Day 11 공통 Tool Allowlist
 
@@ -57,12 +60,47 @@ Tool Runner가 allowlist 확인
 
 현재는 Agent identity와 role을 구분하지 않으므로 하나의 작은 공통 allowlist를 사용한다. 여러 Agent가 서로 다른 책임을 갖게 되면 monitor 역할에는 읽기 Tool만, training 역할에는 `run_train_job`까지 허용하는 방식으로 최소 권한을 세분화할 수 있다.
 
+### Day 12 고정 Handler Dispatch
+
+Day 12의 `src/tool_runner.py`는 설정을 실제 실행 통제로 연결한다.
+
+```text
+Tool 이름과 선택 입력 수신
+        ↓
+tools.yaml allowlist 등록 확인
+        ↓
+input_type과 실제 입력 비교
+        ↓
+TOOL_HANDLERS의 고정 Python 함수 확인
+        ↓
+실행 또는 구조화된 거부 결과 반환
+```
+
+Allowlist와 handler mapping을 모두 확인하는 이유는 설정에 이름만 추가해도 코드 실행 권한이 생기지 않게 하기 위해서다. Tool 이름을 shell command로 해석하지 않고 코드에서 검토한 Python 함수에만 연결한다.
+
+| Tool | 쉬운 목적 | 동작 |
+|---|---|---|
+| `echo` | Tool 호출 경로 확인 | 전달받은 문자열을 그대로 반환 |
+| `list_artifacts` | 저장된 model 확인 | `artifacts/*/model.pkl`과 run ID 조회 |
+| `read_log_summary` | 최근 학습 상태 확인 | 최근 run 5개의 성공·실패와 핵심 결과 요약 |
+| `run_train_job` | Agent 요청으로 학습 실행 | 기본 설정 학습 후 run log와 artifact 생성 |
+
+성공과 실패는 `tool_name`, `status`, `result`, `error_type`, `error_message`라는 공통 field를 사용한다. `run_train_job`은 Tool handler 자체의 `status`와 내부 학습의 `training_status`를 구분한다.
+
 ## 흔한 실패 사례
 
 - 실패: 허용되지 않은 도구 요청
 - 증상: 등록되지 않았거나 위험한 도구 이름이 요청됨
-- 확인할 것: `configs/tools.yaml`, `logs/audit.jsonl`
-- 복구 방법: 기본적으로 요청을 거부하고 시도 자체를 audit log에 기록함
+- 확인할 것: `configs/tools.yaml`, `TOOL_HANDLERS`와 반환된 `ToolNotAllowedError`
+- 복구 방법: 기본적으로 요청을 거부함. 시도 자체의 audit log 기록은 Day 13 범위임
+- 실패: Allowlist에는 있지만 handler가 구현되지 않음
+- 증상: `ToolHandlerNotImplementedError`와 exit code `1`이 반환됨
+- 확인할 것: 설정에 이름만 추가한 것인지, 검토된 handler가 `TOOL_HANDLERS`에 연결됐는지 확인함
+- 복구 방법: 필요한 입력과 resource 범위를 먼저 검토한 뒤 고정 Python handler를 구현함
+- 실패: `input_type: none` Tool에 입력을 전달함
+- 증상: Tool 기능 실행 전에 입력 오류와 exit code `1`이 반환됨
+- 확인할 것: `configs/tools.yaml`의 `input_type`과 CLI의 `--input`
+- 복구 방법: 입력을 제거하거나 text 입력을 받도록 검토된 Tool을 사용함
 - 실패: 잘못된 access나 project 밖 resource가 설정에 포함됨
 - 증상: `tool_config_loader.py`가 exit code 1과 설정 오류를 반환함
 - 확인할 것: `input_type`, `access`, `resources`와 상대 경로 여부
@@ -78,9 +116,9 @@ Agent 도구 실행은 일반 함수 호출처럼 보이더라도 외부 상태�
 
 Allowlist는 등록된 항목만 허용하고 나머지는 기본적으로 거부하는 방식이다. Tool 이름을 shell command로 그대로 실행하는 것이 아니라 미리 구현한 Python handler에 연결해야 arbitrary command 실행 위험을 줄일 수 있다.
 
-Day 11의 `access`와 `resources`는 Tool의 의도된 영향 범위를 설명하고 loader가 설정 오류를 잡는 정책 metadata다. 아직 `tool_runner.py`가 없으므로 실제 요청을 차단하거나 Tool을 실행하지 않으며, OS 파일 권한도 자동으로 바꾸지 않는다.
+Day 11의 `access`와 `resources`는 Tool의 의도된 영향 범위를 설명하고 loader가 설정 오류를 잡는 정책 metadata다. Day 12 runner는 이름, 입력과 고정 handler를 실제로 강제하지만 이 metadata를 OS 파일 권한으로 자동 적용하지는 않는다. Docker의 비 root 사용자와 고정된 handler 경로가 별도의 실행환경 경계를 보완한다.
 
-학습용 `config_loader.py`와 Tool용 `tool_config_loader.py`는 모두 YAML을 검증하지만 대상이 다르다. 전자는 `train.yaml`의 학습 조건을 `run_job.py`에 제공하고, 후자는 `tools.yaml`의 허용 목록을 향후 `tool_runner.py`에 제공한다. 사용자가 직접 실행하는 것은 주로 설정 확인과 troubleshooting을 위한 방법이다.
+학습용 `config_loader.py`와 Tool용 `tool_config_loader.py`는 모두 YAML을 검증하지만 대상이 다르다. 전자는 `train.yaml`의 학습 조건을 `run_job.py`에 제공하고, 후자는 `tools.yaml`의 허용 목록을 `tool_runner.py`에 제공한다. 사용자가 loader를 직접 실행하는 것은 주로 설정 확인과 troubleshooting을 위한 방법이다.
 
 ## Codex Q&A 기록
 
@@ -94,6 +132,12 @@ Day 11의 `access`와 `resources`는 Tool의 의도된 영향 범위를 설명�
   답변: 사용자와 Agent 기준의 구분이 아니라 설정 종류의 차이다. `config_loader.py`는 학습 조건을, `tool_config_loader.py`는 Agent가 요청할 Tool 허용 목록을 검증한다. 실제 운영에서는 각각 `run_job.py`와 향후 `tool_runner.py`가 내부에서 호출한다.
 - 질문: `tool_config_loader.py`는 Agent가 사용할 Tool을 불러오는 것인가?
   답변: 맞다. 더 정확히는 등록된 Tool 정의를 읽고 검증해 향후 Tool Runner가 사용할 공통 allowlist로 반환한다. Loader 자체는 Tool을 실행하지 않는다.
+- 질문: Day 12는 Tool의 구체적인 사용 내용을 만드는 작업인가?
+  답변: 맞다. Day 11이 허용 정책을 정의했다면 Day 12는 각 이름이 요청됐을 때 실행할 Python handler를 만들고 실제 허용·거부를 검증하는 단계다.
+- 질문: `tool_runner.py`는 Tool 실행 파일인가?
+  답변: 맞다. 요청 이름과 입력을 받고 allowlist, 입력 형태와 고정 handler를 확인한 뒤 성공 또는 실패 JSON을 반환하는 중앙 실행 경계다.
+- 질문: 추가한 Tool의 목표를 쉽게 요약하면 무엇인가?
+  답변: `echo`는 호출 경로 확인, `list_artifacts`는 저장 model 조회, `read_log_summary`는 최근 학습 상태 확인, `run_train_job`은 새 학습 실행을 담당한다.
 
 ## 관련 문서
 

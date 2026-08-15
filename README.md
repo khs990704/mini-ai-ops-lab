@@ -2,7 +2,7 @@
 
 ## 프로젝트 소개
 
-Mini AI Ops Lab은 AI 작업을 운영하는 방법을 배우기 위한 작고 이해하기 쉬운 시스템이다. 현재는 학습 작업과 실험 결과를 추적하고 Agent용 Tool allowlist를 정의·검증한다. 이후 실제 도구 호출을 allowlist, timeout과 audit log로 통제하는 기능까지 확장한다.
+Mini AI Ops Lab은 AI 작업을 운영하는 방법을 배우기 위한 작고 이해하기 쉬운 시스템이다. 현재는 학습 작업과 실험 결과를 추적하고 Agent의 Tool 요청을 allowlist와 고정된 Python handler로 통제한다. 이후 Tool timeout과 audit log까지 확장한다.
 
 이 프로젝트는 모델 정확도보다 추적과 복구 가능성을 중요하게 생각한다. 어떤 설정으로 실행했는지, 성공했는지, 어떤 metric과 artifact가 생성됐는지를 나중에도 확인할 수 있어야 한다.
 
@@ -30,14 +30,15 @@ src/train_job.py     src/storage.py
        src/compare_runs.py
        원본·재현 run 비교
 
-Agent의 향후 Tool 요청
+Agent의 Tool 요청
                ↓
        configs/tools.yaml
                ↓
   src/tool_config_loader.py
        검증된 공통 allowlist
                ↓
-  src/tool_runner.py (Day 12)
+  src/tool_runner.py
+   입력 검증과 handler 실행
 ```
 
 `src/run_job.py`가 학습과 저장을 조정하고 성공·실패 record를 남긴다. 상세한 구성요소 책임과 실행 sequence는 [Architecture](docs/architecture.md)에서 확인할 수 있다.
@@ -61,11 +62,13 @@ Agent의 향후 Tool 요청
 - 제어된 학습 실패와 복구 확인 절차
 - Agent용 공통 Tool allowlist와 최소 접근 범위 정의
 - Local 및 Docker의 Tool 설정 검증
+- 허용된 네 Tool의 Python handler 실행
+- 미등록 Tool과 잘못된 입력의 실행 전 차단
+- 성공·실패 Tool 결과의 공통 JSON 구조
 - 프로젝트 내부 기술 위키와 날짜별 작업 기록
 
 다음 기능은 향후 작업 범위다.
 
-- allowlist 기반 Agent 도구 요청 허용·거부와 실행
 - 도구 timeout 및 audit log
 - runbook 확장과 보안·백업 체크리스트
 - 추가 장애 시나리오와 log retention
@@ -234,7 +237,7 @@ python src/compare_runs.py \
 
 같은 config만으로 일반적인 머신러닝의 완전한 재현이 보장되지는 않는다. 현재 run record에는 Git commit, Docker image digest와 data version이 없으며 model byte나 모든 예측 결과도 비교하지 않는다. 실제 선택·재실행·비교 절차와 실패 항목별 대응은 [Runbook](docs/runbook.md)에서 확인한다.
 
-## Agent Tool Allowlist
+## Agent Tool Runner
 
 Agent는 무엇을 할지 판단하고 Tool 사용을 요청하는 주체이며, Tool은 실제 기능이다. `configs/tools.yaml`은 현재 단일 Agent 실행환경에 공통으로 적용할 다음 allowlist를 정의한다.
 
@@ -253,7 +256,37 @@ python src/tool_config_loader.py --config configs/tools.yaml
 
 이 명령은 설정을 읽기만 하며 Tool을 실행하지 않는다. `access`는 각 Tool이 미칠 수 있는 영향의 분류이며, 설정 파일만으로 OS 파일 권한이 적용되지는 않는다.
 
-Day 11은 Tool 정의와 검증까지만 구현했다. Day 12의 `src/tool_runner.py`가 Agent의 요청 이름을 이 allowlist와 비교해 등록되지 않은 Tool을 거부하고 허용된 Python handler를 실행할 예정이다. 현재는 Agent identity나 role을 구분하지 않으므로 모든 요청에 같은 allowlist가 적용된다.
+`src/tool_runner.py`는 요청 이름이 allowlist에 있는지, 입력이 `input_type`과 일치하는지, 해당 이름에 미리 구현된 Python handler가 있는지를 차례로 확인한다. Tool 이름을 shell 명령으로 실행하지 않으므로 YAML에 이름만 추가해도 임의 기능이 실행되지 않는다. 현재는 Agent identity나 role을 구분하지 않으므로 모든 요청에 같은 allowlist가 적용된다.
+
+허용된 Tool은 project root에서 다음과 같이 실행한다.
+
+```bash
+python src/tool_runner.py --tool echo --input "hello"
+python src/tool_runner.py --tool list_artifacts
+python src/tool_runner.py --tool read_log_summary
+python src/tool_runner.py --tool run_train_job
+```
+
+- `echo`는 입력 문자열을 그대로 반환하며 파일을 변경하지 않는다.
+- `list_artifacts`는 저장된 model 경로와 run ID를 읽기만 한다.
+- `read_log_summary`는 최근 학습 run 5개의 상태와 핵심 결과를 읽기만 한다.
+- `run_train_job`은 새 학습을 실행해 `logs/runs.jsonl` 한 줄과 model artifact를 생성한다.
+
+모든 요청은 `tool_name`, `status`, `result`, `error_type`, `error_message`를 가진 JSON으로 반환된다. 허용되지 않은 이름은 기능을 실행하지 않고 exit code `1`로 거부한다.
+
+```bash
+python src/tool_runner.py --tool unknown
+```
+
+Docker에서도 같은 runner를 사용할 수 있다. 이 예시는 host 경로를 mount하지 않으므로 Container 안의 실행 결과는 종료와 함께 제거된다.
+
+```bash
+docker run --rm \
+  mini-ai-ops-lab:day12 \
+  python src/tool_runner.py --tool echo --input "hello"
+```
+
+현재 runner는 allowlist, 입력과 handler 연결을 통제하지만 timeout과 Tool 요청 이력은 아직 처리하지 않는다. 이 운영 통제는 Day 13에서 추가한다.
 
 ## 로그와 감사 기록
 

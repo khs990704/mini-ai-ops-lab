@@ -6,7 +6,7 @@ Mini AI Ops Lab은 작은 머신러닝 학습 작업을 추적 가능한 운영 
 
 ## 현재 구현 범위
 
-Day 12까지 구현된 범위는 다음과 같다.
+Day 13까지 구현된 범위는 다음과 같다.
 
 - Iris 분류 model 학습과 accuracy 계산
 - 실행별 고유 run ID 생성
@@ -29,8 +29,10 @@ Day 12까지 구현된 범위는 다음과 같다.
 - 고정된 Python handler를 통한 네 Tool 실행
 - 미등록 Tool과 잘못된 입력의 실행 전 차단
 - 성공·실패 Tool 결과의 공통 JSON 구조
+- 별도 process 기반 Tool 실행과 제한 시간 초과 종료
+- 성공·거부·실패·timeout의 `logs/audit.jsonl` 누적
 
-Tool timeout과 `logs/audit.jsonl` 기록은 이후 작업 범위이며 현재 실행 흐름에는 포함되지 않는다.
+Agent 또는 role별 권한, audit log rotation과 중단된 쓰기 작업의 자동 rollback은 이후 작업 범위다.
 
 ## 시스템 구성
 
@@ -82,7 +84,15 @@ src/tool_config_loader.py
           │
           ▼
 src/tool_runner.py
- 요청 허용·거부와 handler 실행
+ 요청 허용·거부와 시간 제한
+          │
+          ├──────────────┐
+          ▼              ▼
+ 별도 handler process  src/audit_logger.py
+ 실행 또는 종료       시간·상태 record 생성
+                         │
+                         ▼
+                 logs/audit.jsonl
 ```
 
 Local과 Docker는 별도의 구현을 사용하지 않는다. 두 실행환경 모두 학습에는 `src/run_job.py`, Tool 요청에는 `src/tool_runner.py`를 진입점으로 사용한다.
@@ -98,10 +108,12 @@ Local과 Docker는 별도의 구현을 사용하지 않는다. 두 실행환경 
 | `src/compare_runs.py` | 두 success run의 experiment, parameter, metric과 artifact 존재 여부 비교 | 학습 실행, record나 model 수정 |
 | `configs/tools.yaml` | 허용할 Tool, 입력 형태, 영향 수준과 접근 resource 정의 | 실제 요청 검증, Tool 실행 |
 | `src/tool_config_loader.py` | Tool allowlist의 schema, 값과 상대 resource 경로 검증 | Agent 식별, Tool 요청 허용·실행 |
-| `src/tool_runner.py` | Tool 이름과 입력 검증, 고정 handler dispatch, 구조화된 결과 반환 | shell 명령 실행, timeout, audit log 기록 |
+| `src/tool_runner.py` | Tool 이름·입력 검증, 별도 process의 고정 handler 실행·timeout, 구조화된 결과 반환 | shell 명령 실행, timeout rollback |
+| `src/audit_logger.py` | Tool 요청 시각, duration, 상태와 오류를 JSONL에 append | Tool 허용 판단, handler 실행 |
 | `src/train_job.py` | 검증된 설정에 따른 Iris data 분리, `LogisticRegression` 학습, accuracy와 sample 수 계산 | 운영 상태와 traceback 기록 |
 | `src/storage.py` | 고유 run ID 생성, run별 디렉터리 생성, pickle model 저장 | 학습 실행과 log schema 관리 |
 | `logs/runs.jsonl` | 모든 run의 상태, 시각, metric, artifact 경로와 오류 정보 누적 | model 객체 보관 |
+| `logs/audit.jsonl` | 모든 Tool 요청의 성공·거부·실패·timeout 이력 누적 | 학습 parameter와 model 보관 |
 | `artifacts/{run_id}/model.pkl` | 실행별 학습 model 보관 | 실행 원인과 상태 설명 |
 | `Dockerfile` | Python 3.12, dependency, source, 기본 설정과 실행 명령을 image로 정의 | 실행 결과를 영구 보존 |
 | `.dockerignore` | 불필요한 개발 파일, 기존 결과와 secret 가능 파일을 build context에서 제외 | Git ignore 규칙 대체 |
@@ -190,9 +202,11 @@ Agent: 필요한 Tool을 판단하고 이름으로 요청
                  ↓
 Tool Runner: tools.yaml 등록 여부와 입력 확인
                  ↓
-고정 handler: 이름과 연결된 project 기능만 실행
+별도 process: 고정 handler 실행과 timeout 대기
                  ↓
-구조화된 성공 또는 실패 JSON 반환
+성공 결과 반환 또는 process 종료
+                 ↓
+audit_logger: duration과 success/failed/timeout 기록
 ```
 
 Day 11의 `configs/tools.yaml`은 `echo`, `list_artifacts`, `read_log_summary`, `run_train_job` 네 이름만 실행 후보로 정의한다. `none`, `read`, `write`는 Tool이 미칠 수 있는 가장 높은 영향 수준을 나타내며 `resources`는 의도한 접근 범위를 설명한다.
@@ -208,7 +222,9 @@ Day 11의 `configs/tools.yaml`은 `echo`, `list_artifacts`, `read_log_summary`, 
 | `read_log_summary` | 최근 run 5개의 상태와 결과 요약 | 없음 |
 | `run_train_job` | 기본 설정으로 `run_training_job()` 호출 | run log와 model 생성 |
 
-성공과 실패는 공통으로 `tool_name`, `status`, `result`, `error_type`, `error_message`를 반환한다. `run_train_job`의 `result.training_status`는 Tool handler 실행 결과와 내부 학습 결과를 구분한다.
+성공, 실패와 timeout은 공통으로 `tool_name`, `status`, `result`, `error_type`, `error_message`를 반환한다. `run_train_job`의 `result.training_status`는 Tool handler 실행 결과와 내부 학습 결과를 구분한다.
+
+`tool_runner.py`는 Linux/WSL의 `fork` context로 handler process를 만들고 pipe를 통해 결과를 받는다. `--timeout` 안에 결과가 없으면 먼저 `terminate()`, 필요하면 `kill()`로 process를 정리한다. 요청 전체의 시작·종료 UTC 시각과 단조 시계 기반 duration은 `audit_logger.py`가 JSONL record로 만든다. 원문 입력 대신 `input_provided`만 기록한다.
 
 현재는 Agent identity가 없는 단일 실행환경이므로 모든 요청이 같은 공통 allowlist를 사용한다. 여러 Agent의 역할이 실제로 나뉘면 Agent 또는 role별 최소 권한 목록으로 확장할 수 있다.
 
@@ -223,10 +239,11 @@ python src/run_job.py --config configs/train.yaml
 python src/list_runs.py --experiment iris-baseline --limit 3
 python src/compare_runs.py --source-run 20260812T004148291974Z-e2bef42e --candidate-run 20260813T050336148461Z-c104baf9
 python src/tool_config_loader.py --config configs/tools.yaml
-python src/tool_runner.py --tool echo --input "hello"
-python src/tool_runner.py --tool list_artifacts
-python src/tool_runner.py --tool read_log_summary
-python src/tool_runner.py --tool run_train_job
+python src/tool_runner.py --tool echo --input "hello" --timeout 1
+python src/tool_runner.py --tool list_artifacts --timeout 1
+python src/tool_runner.py --tool read_log_summary --timeout 1
+python src/tool_runner.py --tool run_train_job --timeout 30
+tail -n 5 logs/audit.jsonl
 ```
 
 ### Docker
@@ -258,7 +275,10 @@ Docker image는 Python 3.12, dependency, `src/`, `configs/`와 기본 명령을 
 - 현재 log와 artifact는 Git에서 제외되며 별도의 backup·retention 정책은 아직 없다.
 - Tool allowlist는 현재 모든 요청에 공통이며 Agent별 role과 identity를 구분하지 않는다.
 - Tool runner는 allowlist, 입력과 고정 handler 연결을 강제하지만 `access`와 `resources`를 OS 파일 권한으로 직접 적용하지는 않는다.
-- Tool 실행 timeout과 `logs/audit.jsonl` 요청 이력은 아직 없다.
+- Timeout은 child process를 종료하지만 이미 생성된 log, artifact나 외부 상태를 자동으로 rollback하지 않는다.
+- 별도 process 실행은 현재 WSL/Linux와 Docker의 `fork` 실행환경을 기준으로 한다.
+- Audit log는 원문 입력과 handler 결과 전체를 저장하지 않으며, 별도 rotation이나 동시 쓰기 제어가 없다.
+- Tool 기능이 완료된 뒤 audit log 쓰기가 실패하면 기능의 상태 변경은 이미 발생했을 수 있다.
 
 이 제약은 현재 학습용 단일 job 범위를 명확히 하기 위한 것이다. 동시성, 장기 보존을 위한 설정 원본 관리, backup과 Agent 실행 통제는 이후 작업에서 단계적으로 추가한다.
 
@@ -278,6 +298,8 @@ configs/tools.yaml
 allowlist 기반 Agent tool runner
        ↓
 timeout과 logs/audit.jsonl
+       ↓
+운영 문서, 보안과 backup 점검
 ```
 
 ## 관련 문서

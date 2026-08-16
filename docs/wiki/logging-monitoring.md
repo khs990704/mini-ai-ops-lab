@@ -19,6 +19,7 @@ structured log는 상태와 시각 같은 정보를 정해진 field로 기록한
 - `src/config_loader.py`
 - `src/list_runs.py`
 - `src/tool_runner.py`
+- `src/audit_logger.py`
 
 ### Day 4~5 성공·실패 run log
 
@@ -33,6 +34,27 @@ structured log는 상태와 시각 같은 정보를 정해진 field로 기록한
 - `metrics`, `artifact_path`: 성공하면 결과가 있고 실패하면 `null`
 - `error_type`, `error_message`, `traceback`: 실패하면 원인이 있고 성공하면 `null`
 
+### Day 13 Agent Tool audit log
+
+`src/audit_logger.py`는 Tool 요청이 끝날 때마다 `logs/audit.jsonl`에 한 줄을 추가한다. 허용된 실행뿐 아니라 미등록 요청, handler 실패와 timeout도 기록한다.
+
+- `tool_name`: 요청한 Tool 이름
+- `status`: `success`, `failed` 또는 `timeout`
+- `started_at`, `ended_at`: 요청 전체의 UTC 시작·종료 시각
+- `duration_seconds`: 설정 검증부터 결과 처리까지 단조 시계로 측정한 시간
+- `input_provided`: 원문을 저장하지 않고 입력 제공 여부만 나타냄
+- `timeout_seconds`: 요청에 적용한 제한 시간
+- `error_type`, `error_message`: 거부·실패·timeout 원인
+
+Run log와 audit log는 목적이 다르다.
+
+| Log | 질문 | 기록 시점 |
+|---|---|---|
+| `logs/runs.jsonl` | 학습이 어떤 조건과 결과로 끝났는가? | 학습 작업 종료 시 |
+| `logs/audit.jsonl` | Agent가 어떤 Tool을 요청했고 어떻게 처리됐는가? | 모든 Tool 요청 종료 시 |
+
+`python src/run_job.py`로 직접 학습하면 run log만 남는다. `tool_runner.py --tool run_train_job`을 사용하면 학습 run log와 Tool audit log가 모두 남는다.
+
 ## 알아둘 명령어나 코드
 
 ```bash
@@ -41,13 +63,15 @@ python src/run_job.py --config configs/missing.yaml
 python src/run_job.py --fail
 python src/list_runs.py --limit 5
 python src/list_runs.py --experiment iris-baseline --limit 3
+python src/tool_runner.py --tool echo --input "hello" --timeout 1
+python src/tool_runner.py --tool run_train_job --timeout 0
 echo $?
 tail -n 3 logs/runs.jsonl
 tail -n 5 logs/audit.jsonl
 wc -l logs/runs.jsonl
 ```
 
-첫 번째 실행은 새 artifact와 success log를 만든다. 존재하지 않는 설정 경로는 `FileNotFoundError` failed log를 남기며 artifact를 만들지 않는다. `--fail` 실행은 검증용 exception을 발생시켜 failed log만 만든다. `list_runs.py` 명령은 전체 또는 선택한 실험의 최근 record를 변경 없이 조회한다. `echo $?`는 바로 앞 process의 exit code를 확인한다. `tail`과 `wc`는 원본 로그나 전체 줄 수를 확인한다.
+첫 번째 실행은 새 artifact와 success log를 만든다. 존재하지 않는 설정 경로는 `FileNotFoundError` failed log를 남기며 artifact를 만들지 않는다. `--fail` 실행은 검증용 exception을 발생시켜 failed log만 만든다. `list_runs.py` 명령은 전체 또는 선택한 실험의 최근 record를 변경 없이 조회한다. Tool Runner 명령은 각각 success와 timeout audit record를 추가한다. `echo $?`는 바로 앞 process의 exit code를 확인한다. `tail`과 `wc`는 원본 로그나 전체 줄 수를 확인한다.
 
 ## 흔한 실패 사례
 
@@ -71,6 +95,14 @@ wc -l logs/runs.jsonl
 - 증상: 특정 line에서 JSON decode 오류가 발생함
 - 확인할 것: `list_runs.py`가 출력한 경고의 line 번호와 원본 `logs/runs.jsonl`
 - 복구 방법: 조회 도구는 손상 line을 경고 후 건너뛰고 나머지를 표시한다. 원본 수정 전에는 별도 backup과 손상 원인 확인이 필요함
+- 실패: Tool은 실행됐지만 audit log를 쓸 수 없음
+- 증상: Tool 결과가 발생했을 수 있지만 CLI는 audit 파일 접근 오류와 exit code `1`을 반환함
+- 확인할 것: `logs/` 경로, 파일 소유자·권한, disk 공간과 Container mount
+- 복구 방법: audit 경로 쓰기 문제를 해결하고 이미 발생한 업무 상태를 별도로 확인함
+- 실패: audit log에 원문 입력이나 결과 전체를 저장함
+- 증상: credential이나 민감한 요청 내용이 운영 로그에 남을 수 있음
+- 확인할 것: audit schema와 기록되는 field
+- 복구 방법: 이 프로젝트처럼 `input_provided`와 최소 오류 정보만 남기고 민감정보를 제외함
 
 ## 실용적인 이해
 
@@ -88,6 +120,10 @@ exception을 잡는 목적은 실패를 성공처럼 숨기는 것이 아니라 
 
 traceback은 오류가 어느 호출 경로에서 발생했는지 보여준다. JSONL에서는 줄바꿈이 escape되므로 긴 traceback도 하나의 실행 record가 한 물리적 줄을 유지한다. `except Exception`은 일반적인 작업 오류를 처리하되 `KeyboardInterrupt`나 `SystemExit` 같은 process 제어 신호까지 강제로 변환하지 않는다.
 
+Audit log의 `duration_seconds`는 Tool handler 시간만이 아니라 설정 로드, allowlist·입력 검증, child process 시작과 결과 전달을 포함한 요청 전체 시간이다. 그래서 `run_train_job` audit duration은 내부 run log의 학습 duration보다 조금 길 수 있다.
+
+잘못된 Tool 이름은 실행되지 않아도 요청 시도 자체가 운영 사건이므로 `failed` audit record가 남는다. 반면 음수 timeout처럼 CLI argument parsing에서 거부된 값은 Tool 요청이 시작되기 전이므로 audit record가 생기지 않는다.
+
 ## Codex Q&A 기록
 
 - 질문: Day 3까지는 학습한 model을 저장하고 Day 4에는 그 학습의 로그까지 기록하는 것인가?
@@ -98,6 +134,8 @@ traceback은 오류가 어느 호출 경로에서 발생했는지 보여준다. 
   답변: 실제 환경 장애를 만들지는 않는다. 학습 전에 제어된 `RuntimeError`를 발생시켜 같은 실패 처리 경로를 안전하게 반복 검증한다. CLI의 `--fail`이 이 값을 전달한다.
 - 질문: 실패 시 failed log가 남는지 테스트하기 위해 수정하고 검증한 것인가?
   답변: 맞다. `--fail`은 검증용 발생 장치이고 `try/except`와 failed record 작성은 실제 학습 또는 artifact 저장 exception에도 적용되는 운영 기능이다.
+- 질문: 기존 Tool들에 대한 기록을 남기는 것인가?
+  답변: 맞다. `logs/audit.jsonl`은 정상 실행, 미등록 요청, handler 실패와 timeout을 모두 같은 schema로 기록해 Agent의 Tool 사용 이력을 추적한다.
 
 ## 관련 문서
 

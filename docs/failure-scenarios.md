@@ -71,10 +71,77 @@ tail -n 2 logs/runs.jsonl
 - `KeyboardInterrupt`와 `SystemExit`처럼 일반적인 작업 오류가 아닌 process 제어 신호는 `except Exception`으로 강제로 변환하지 않는다.
 - 현재는 단일 process 실행을 기준으로 하며 동시 log 쓰기와 log rotation은 이후 운영 범위에서 검토한다.
 
+## 2. Agent Tool Timeout
+
+### 목적
+
+Tool이 끝나지 않거나 너무 오래 자원을 점유할 때 제한 시간 이후 별도 process를 종료하고 그 사실을 audit log에서 추적할 수 있는지 확인한다.
+
+### 안전한 재현 방법
+
+```bash
+python src/tool_runner.py --tool run_train_job --timeout 0
+echo $?
+```
+
+- `--timeout 0`은 결과를 기다리지 않고 즉시 timeout 경로를 재현한다.
+- Tool 요청은 `logs/audit.jsonl`에 기록된다.
+- 쓰기 Tool을 중단하는 검증이므로 일반적으로 일부 결과가 남을 가능성을 고려해야 한다.
+- Day 13 검증에서는 run log와 model artifact 개수가 변하지 않았지만 이를 항상 보장하지는 않는다.
+- 예상 결과는 terminal의 timeout JSON과 exit code `1`이다.
+
+### 증상
+
+- process가 exit code `1`로 종료된다.
+- terminal의 `stderr`에 `status: timeout`과 `ToolTimeoutError`가 출력된다.
+- Agent가 정상 Tool 결과를 받지 못한다.
+- 작업 진행 시점에 따라 일부 log, artifact 또는 외부 상태가 남을 수 있다.
+
+### 확인할 로그와 결과
+
+```bash
+tail -n 1 logs/audit.jsonl
+tail -n 1 logs/runs.jsonl
+find artifacts -maxdepth 2 -type f -name 'model.pkl'
+```
+
+- 첫 명령은 마지막 Tool 요청의 `status`, `duration_seconds`, `timeout_seconds`와 오류를 확인한다.
+- 두 번째 명령은 timeout Tool이 학습 run record를 남겼는지 읽기만 한다.
+- 세 번째 명령은 일부 model artifact가 생성됐는지 목록을 읽기만 한다.
+- Audit record의 성공 기준은 `status: timeout`, `error_type: ToolTimeoutError`와 요청한 제한 시간이다.
+
+### 원인
+
+검증에서는 `--timeout 0`을 사용해 의도적으로 결과 대기 시간을 없앴다. 실제 운영에서는 무한 반복, 느린 학습, 응답하지 않는 외부 서비스, 잠금 대기 또는 부족한 CPU·memory 때문에 제한 시간을 넘길 수 있다.
+
+### 복구 및 정상 동작 확인
+
+1. `logs/audit.jsonl`에서 어떤 Tool이 얼마 후 timeout 됐는지 확인한다.
+2. 쓰기 Tool이면 관련 run log, artifact와 외부 상태에 일부 결과가 남았는지 확인한다.
+3. 원인을 해결하거나 정상 소요 시간보다 긴 제한 시간을 정한다.
+4. 정상 제한 시간으로 다시 실행한다.
+
+```bash
+python src/tool_runner.py --tool run_train_job --timeout 30
+echo $?
+tail -n 2 logs/audit.jsonl
+```
+
+- 정상 재실행은 run log와 model artifact를 생성하므로 project 상태를 변경한다.
+- 예상 결과는 exit code `0`, Tool과 학습의 `success`, 새 model 경로다.
+- 마지막 audit 두 줄에서 이전 `timeout`과 새 `success`를 확인하면 복구 검증이 끝난다.
+
+### 예방과 현재 범위
+
+- Tool별 정상 소요 시간과 자원 특성에 맞는 timeout을 사용한다.
+- Handler는 별도 process에서 실행해 timeout 후 남은 실행을 종료한다.
+- Timeout은 transaction rollback이 아니므로 쓰기 작업은 임시 경로와 완료 후 rename 같은 원자적 저장 방식을 추가로 고려한다.
+- 현재 기본값은 모든 Tool에 공통 30초이며 Tool별 설정과 재시도 정책은 아직 없다.
+- Audit log 쓰기 실패, 동시 실행과 log rotation은 별도 운영 과제로 남아 있다.
+
 ## 향후 추가할 시나리오
 
 - model artifact 저장 실패
 - config load 실패
-- Agent tool timeout
 - 허용되지 않은 tool 요청
 - 과도한 log 증가

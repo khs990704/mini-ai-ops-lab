@@ -4,11 +4,16 @@ import argparse
 import json
 import sys
 from collections.abc import Callable
+from math import isfinite
+from multiprocessing import get_context
+from multiprocessing.connection import Connection
 from pathlib import Path
+from time import perf_counter
 from typing import Any, TypedDict
 
 # 파일 직접 실행과 module import 모두에서 같은 Tool 설정 loader를 사용한다.
 if __package__:
+    from .audit_logger import append_audit_log, create_audit_record, utc_now_iso
     from .list_runs import RUN_LOG_PATH, get_experiment_name, load_recent_runs
     from .run_job import run_training_job
     from .storage import ARTIFACT_ROOT
@@ -18,6 +23,7 @@ if __package__:
         load_tool_config,
     )
 else:
+    from audit_logger import append_audit_log, create_audit_record, utc_now_iso
     from list_runs import RUN_LOG_PATH, get_experiment_name, load_recent_runs
     from run_job import run_training_job
     from storage import ARTIFACT_ROOT
@@ -44,6 +50,22 @@ class ToolNotAllowedError(ValueError):
 
 class ToolHandlerNotImplementedError(ValueError):
     """등록됐지만 아직 안전한 handler가 없는 Tool 요청임을 구분한다."""
+
+
+class ToolTimeoutError(TimeoutError):
+    """Tool handler가 허용된 실행 시간을 넘겼음을 구분한다."""
+
+
+class ToolHandlerExecutionError(RuntimeError):
+    """별도 process에서 발생한 handler 오류의 원래 정보를 전달한다."""
+
+    def __init__(self, error_type: str, error_message: str) -> None:
+        super().__init__(error_message)
+        self.error_type = error_type
+        self.error_message = error_message
+
+
+DEFAULT_TIMEOUT_SECONDS = 30.0
 
 
 def handle_echo(tool_input: str | None) -> str:
@@ -122,6 +144,86 @@ TOOL_HANDLERS: dict[str, Callable[[str | None], Any]] = {
 }
 
 
+def run_handler_in_child(
+    handler: Callable[[str | None], Any],
+    tool_input: str | None,
+    connection: Connection,
+) -> None:
+    """Handler 결과나 오류를 부모 process에 전달하고 실행을 격리한다."""
+    try:
+        result = handler(tool_input)
+        connection.send(
+            {
+                "succeeded": True,
+                "result": result,
+                "error_type": None,
+                "error_message": None,
+            }
+        )
+    except Exception as error:
+        connection.send(
+            {
+                "succeeded": False,
+                "result": None,
+                "error_type": type(error).__name__,
+                "error_message": str(error),
+            }
+        )
+    finally:
+        connection.close()
+
+
+def execute_handler_with_timeout(
+    tool_name: str,
+    handler: Callable[[str | None], Any],
+    tool_input: str | None,
+    timeout_seconds: float,
+) -> Any:
+    """별도 process의 결과를 제한 시간만 기다리고 초과 시 종료한다."""
+    if not isfinite(timeout_seconds) or timeout_seconds < 0:
+        raise ValueError("timeout은 0 이상의 유한한 숫자여야 합니다.")
+
+    context = get_context("fork")
+    receive_connection, send_connection = context.Pipe(duplex=False)
+    process = context.Process(
+        target=run_handler_in_child,
+        args=(handler, tool_input, send_connection),
+    )
+    process.start()
+    # 부모는 결과를 읽기만 하므로 불필요한 송신 endpoint를 즉시 닫는다.
+    send_connection.close()
+
+    try:
+        if not receive_connection.poll(timeout_seconds):
+            process.terminate()
+            process.join(timeout=1)
+            if process.is_alive():
+                # terminate 신호에도 끝나지 않는 process까지 남기지 않는다.
+                process.kill()
+                process.join()
+            raise ToolTimeoutError(
+                f"{tool_name} Tool이 제한 시간 {timeout_seconds}초를 초과했습니다."
+            )
+
+        try:
+            payload = receive_connection.recv()
+        except EOFError as error:
+            raise ToolHandlerExecutionError(
+                "ChildProcessError",
+                f"{tool_name} Tool process가 결과 없이 종료됐습니다.",
+            ) from error
+    finally:
+        receive_connection.close()
+
+    process.join()
+    if not payload["succeeded"]:
+        raise ToolHandlerExecutionError(
+            payload["error_type"],
+            payload["error_message"],
+        )
+    return payload["result"]
+
+
 def validate_tool_input(
     tool_name: str,
     definition: ToolDefinition,
@@ -139,6 +241,7 @@ def execute_tool(
     tool_name: str,
     tool_input: str | None = None,
     config_path: str | Path = DEFAULT_TOOL_CONFIG_PATH,
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> ToolResult:
     """요청을 allowlist와 비교한 뒤 고정된 handler만 실행한다."""
     config = load_tool_config(config_path)
@@ -161,21 +264,85 @@ def execute_tool(
     return {
         "tool_name": tool_name,
         "status": "success",
-        "result": handler(tool_input),
+        "result": execute_handler_with_timeout(
+            tool_name,
+            handler,
+            tool_input,
+            timeout_seconds,
+        ),
         "error_type": None,
         "error_message": None,
     }
 
 
-def build_failed_result(tool_name: str, error: Exception) -> ToolResult:
+def build_failed_result(
+    tool_name: str,
+    error: Exception,
+    status: str = "failed",
+) -> ToolResult:
     """거부 또는 실행 실패를 Agent가 해석할 수 있는 구조로 변환한다."""
+    if isinstance(error, ToolHandlerExecutionError):
+        error_type = error.error_type
+        error_message = error.error_message
+    else:
+        error_type = type(error).__name__
+        error_message = str(error)
+
     return {
         "tool_name": tool_name,
-        "status": "failed",
+        "status": status,
         "result": None,
-        "error_type": type(error).__name__,
-        "error_message": str(error),
+        "error_type": error_type,
+        "error_message": error_message,
     }
+
+
+def run_tool_request(
+    tool_name: str,
+    tool_input: str | None = None,
+    config_path: str | Path = DEFAULT_TOOL_CONFIG_PATH,
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+) -> ToolResult:
+    """Tool 요청을 실행하고 성공·거부·실패 결과를 빠짐없이 감사 기록한다."""
+    started_at = utc_now_iso()
+    started_counter = perf_counter()
+
+    try:
+        result = execute_tool(
+            tool_name,
+            tool_input,
+            config_path,
+            timeout_seconds,
+        )
+    except ToolTimeoutError as error:
+        result = build_failed_result(tool_name, error, status="timeout")
+    except Exception as error:
+        # 예상하지 못한 handler 오류도 같은 결과 구조와 audit field로 추적한다.
+        result = build_failed_result(tool_name, error)
+
+    audit_record = create_audit_record(
+        tool_name=tool_name,
+        status=result["status"],
+        started_at=started_at,
+        started_counter=started_counter,
+        input_provided=tool_input is not None,
+        error_type=result["error_type"],
+        error_message=result["error_message"],
+        timeout_seconds=timeout_seconds,
+    )
+    # Tool 결과만 출력하고 이력을 잃는 상황을 막기 위해 반환 전에 기록한다.
+    append_audit_log(audit_record)
+    return result
+
+
+def non_negative_float(value: str) -> float:
+    """Timeout 값이 0 이상의 유한한 숫자인지 CLI 단계에서 검증한다."""
+    parsed_value = float(value)
+    if not isfinite(parsed_value) or parsed_value < 0:
+        raise argparse.ArgumentTypeError(
+            "timeout은 0 이상의 유한한 숫자여야 합니다."
+        )
+    return parsed_value
 
 
 def parse_args() -> argparse.Namespace:
@@ -191,6 +358,12 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_TOOL_CONFIG_PATH,
         help=f"Tool 설정 YAML 경로 (기본값: {DEFAULT_TOOL_CONFIG_PATH})",
     )
+    parser.add_argument(
+        "--timeout",
+        type=non_negative_float,
+        default=DEFAULT_TIMEOUT_SECONDS,
+        help=f"Tool 실행 제한 시간(초) (기본값: {DEFAULT_TIMEOUT_SECONDS})",
+    )
     return parser.parse_args()
 
 
@@ -198,14 +371,21 @@ def main() -> int:
     """구조화된 결과를 출력하고 성공 여부를 process exit code로 알린다."""
     args = parse_args()
     try:
-        result = execute_tool(args.tool, args.input, args.config)
-    except (OSError, ValueError) as error:
+        result = run_tool_request(
+            args.tool,
+            args.input,
+            args.config,
+            args.timeout,
+        )
+    except OSError as error:
+        # Audit log를 남기지 못한 실행은 운영상 완료로 간주하지 않는다.
         result = build_failed_result(args.tool, error)
         print(json.dumps(result, ensure_ascii=False, sort_keys=True), file=sys.stderr)
         return 1
 
-    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-    return 0
+    output_stream = sys.stdout if result["status"] == "success" else sys.stderr
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True), file=output_stream)
+    return 0 if result["status"] == "success" else 1
 
 
 if __name__ == "__main__":

@@ -151,6 +151,57 @@ python src/compare_runs.py \
 
 따라서 이번 결과는 남아 있던 같은 Day 9 image와 같은 설정에서 현재 metric이 반복됐다는 증거다. 장기적인 재현성을 강화하려면 이후 run record에 code commit, image digest와 dependency 또는 data version을 추가해야 한다.
 
+## Agent Tool 요청 확인
+
+### Tool 실행과 Audit Record
+
+Tool Runner의 기본 제한 시간은 30초다. 다음 명령은 `echo` 결과를 반환하고 audit log 한 줄을 추가한다.
+
+```bash
+python src/tool_runner.py --tool echo --input "hello" --timeout 1
+```
+
+- 목적: 허용된 Tool의 정상 실행과 감사 기록을 확인한다.
+- 변경 여부: Tool 자체는 project 업무 데이터를 바꾸지 않지만 `logs/audit.jsonl`에 한 줄을 추가한다.
+- 성공 기준: exit code `0`, `status: success`, `result: "hello"`가 출력된다.
+
+최근 요청을 확인한다.
+
+```bash
+tail -n 5 logs/audit.jsonl
+```
+
+- 목적: 최근 Tool 이름, 상태, 실행 시간, 제한 시간과 오류를 확인한다.
+- 변경 여부: audit log를 읽기만 한다.
+- 성공 기준: 각 물리적 줄이 독립된 JSON 객체이며 필수 field를 포함한다.
+
+| `status` | 의미 | 다음 확인 |
+|---|---|---|
+| `success` | 제한 시간 안에 handler가 결과를 반환함 | 쓰기 Tool이면 생성된 업무 결과 확인 |
+| `failed` | 미등록·입력 오류 또는 handler 실패 | `error_type`, `error_message`와 설정 확인 |
+| `timeout` | 제한 시간 안에 결과를 받지 못해 process를 종료함 | 일부 결과 여부와 자원 상태 확인 |
+
+Audit record는 `tool_name`, `status`, `started_at`, `ended_at`, `duration_seconds`, `input_provided`, `timeout_seconds`, `error_type`, `error_message`를 포함한다. 민감정보 노출을 줄이기 위해 원문 입력과 handler 결과 전체는 저장하지 않는다.
+
+`python src/run_job.py`처럼 Tool Runner를 거치지 않은 직접 학습은 `logs/runs.jsonl`만 기록한다. Agent Tool 이력을 남겨야 한다면 `python src/tool_runner.py --tool run_train_job`을 사용해야 한다.
+
+### Timeout 대응
+
+마지막 요청이 timeout이면 다음 순서로 확인한다.
+
+1. Audit record의 Tool 이름, 제한 시간과 실제 duration을 확인한다.
+2. 쓰기 Tool이면 `logs/runs.jsonl`, `artifacts/`와 외부 상태에 일부 결과가 남았는지 확인한다.
+3. CPU·memory 부족, 느린 dependency, 잠금이나 무한 반복 원인을 해결한다.
+4. 정상 소요 시간을 고려한 timeout으로 새 요청을 실행한다.
+
+```bash
+python src/tool_runner.py --tool run_train_job --timeout 30
+```
+
+이 명령은 새 학습 run, model artifact와 audit record를 생성한다. `status: success`, `result.training_status: success`와 실제 model 경로가 모두 존재하면 정상 복구다.
+
+CLI가 음수, 무한대 또는 `NaN` timeout을 거부하면 Tool 요청이 시작되기 전이므로 audit record도 생성되지 않는다. Timeout process 종료는 이미 발생한 상태 변경을 자동으로 되돌리지 않는다.
+
 ## 관련 문서
 
 - [프로젝트 README](../README.md)

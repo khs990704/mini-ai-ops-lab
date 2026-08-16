@@ -2,7 +2,7 @@
 
 ## 프로젝트 소개
 
-Mini AI Ops Lab은 AI 작업을 운영하는 방법을 배우기 위한 작고 이해하기 쉬운 시스템이다. 현재는 학습 작업과 실험 결과를 추적하고 Agent의 Tool 요청을 allowlist와 고정된 Python handler로 통제한다. 이후 Tool timeout과 audit log까지 확장한다.
+Mini AI Ops Lab은 AI 작업을 운영하는 방법을 배우기 위한 작고 이해하기 쉬운 시스템이다. 현재는 학습 작업과 실험 결과를 추적하고 Agent의 Tool 요청을 allowlist, timeout과 audit log로 통제한다.
 
 이 프로젝트는 모델 정확도보다 추적과 복구 가능성을 중요하게 생각한다. 어떤 설정으로 실행했는지, 성공했는지, 어떤 metric과 artifact가 생성됐는지를 나중에도 확인할 수 있어야 한다.
 
@@ -38,7 +38,10 @@ Agent의 Tool 요청
        검증된 공통 allowlist
                ↓
   src/tool_runner.py
-   입력 검증과 handler 실행
+   입력 검증과 별도 process 실행
+          ↓             ↘
+  제한 시간 내 결과     logs/audit.jsonl
+  또는 process 종료      모든 요청 이력
 ```
 
 `src/run_job.py`가 학습과 저장을 조정하고 성공·실패 record를 남긴다. 상세한 구성요소 책임과 실행 sequence는 [Architecture](docs/architecture.md)에서 확인할 수 있다.
@@ -65,17 +68,18 @@ Agent의 Tool 요청
 - 허용된 네 Tool의 Python handler 실행
 - 미등록 Tool과 잘못된 입력의 실행 전 차단
 - 성공·실패 Tool 결과의 공통 JSON 구조
+- Tool별 제한 시간과 별도 process 종료
+- 성공·거부·실패·timeout audit log
 - 프로젝트 내부 기술 위키와 날짜별 작업 기록
 
 다음 기능은 향후 작업 범위다.
 
-- 도구 timeout 및 audit log
 - runbook 확장과 보안·백업 체크리스트
 - 추가 장애 시나리오와 log retention
 
 ## 시작 방법
 
-프로젝트는 local Python 환경이나 Docker container에서 실행할 수 있다. 두 방식 모두 같은 `src/run_job.py`를 사용한다.
+프로젝트는 local Python 환경이나 Docker container에서 실행할 수 있다. 두 방식 모두 학습에는 `src/run_job.py`, Tool 요청에는 `src/tool_runner.py`를 사용한다.
 
 ### Local Python 실행환경
 
@@ -261,16 +265,18 @@ python src/tool_config_loader.py --config configs/tools.yaml
 허용된 Tool은 project root에서 다음과 같이 실행한다.
 
 ```bash
-python src/tool_runner.py --tool echo --input "hello"
-python src/tool_runner.py --tool list_artifacts
-python src/tool_runner.py --tool read_log_summary
-python src/tool_runner.py --tool run_train_job
+python src/tool_runner.py --tool echo --input "hello" --timeout 1
+python src/tool_runner.py --tool list_artifacts --timeout 1
+python src/tool_runner.py --tool read_log_summary --timeout 1
+python src/tool_runner.py --tool run_train_job --timeout 30
 ```
 
-- `echo`는 입력 문자열을 그대로 반환하며 파일을 변경하지 않는다.
-- `list_artifacts`는 저장된 model 경로와 run ID를 읽기만 한다.
-- `read_log_summary`는 최근 학습 run 5개의 상태와 핵심 결과를 읽기만 한다.
+- `echo`는 입력 문자열을 그대로 반환한다.
+- `list_artifacts`는 저장된 model 경로와 run ID를 조회한다.
+- `read_log_summary`는 최근 학습 run 5개의 상태와 핵심 결과를 조회한다.
 - `run_train_job`은 새 학습을 실행해 `logs/runs.jsonl` 한 줄과 model artifact를 생성한다.
+
+모든 명령은 Tool의 주요 기능과 별개로 `logs/audit.jsonl`에 요청 이력 한 줄을 추가한다. 기본 제한 시간은 30초이며 `--timeout`으로 0 이상의 유한한 초 단위 값을 지정할 수 있다.
 
 모든 요청은 `tool_name`, `status`, `result`, `error_type`, `error_message`를 가진 JSON으로 반환된다. 허용되지 않은 이름은 기능을 실행하지 않고 exit code `1`로 거부한다.
 
@@ -282,18 +288,26 @@ Docker에서도 같은 runner를 사용할 수 있다. 이 예시는 host 경로
 
 ```bash
 docker run --rm \
-  mini-ai-ops-lab:day12 \
-  python src/tool_runner.py --tool echo --input "hello"
+  mini-ai-ops-lab:day13 \
+  python src/tool_runner.py --tool echo --input "hello" --timeout 1
 ```
 
-현재 runner는 allowlist, 입력과 handler 연결을 통제하지만 timeout과 Tool 요청 이력은 아직 처리하지 않는다. 이 운영 통제는 Day 13에서 추가한다.
+Runner는 handler를 WSL과 Docker의 별도 process에서 실행한다. 제한 시간 안에 결과가 없으면 해당 process를 종료하고 `status: timeout`, `ToolTimeoutError`와 exit code `1`을 반환한다. Timeout은 이미 생성된 파일을 되돌리지 않으므로 쓰기 Tool이 중단됐다면 log와 artifact에 일부 결과가 남았는지도 확인해야 한다.
 
 ## 로그와 감사 기록
 
 실행 중 생성되는 운영 기록은 JSON Lines(JSONL) 형식을 사용한다.
 
 - `logs/runs.jsonl`: 학습 실행 기록
-- `logs/audit.jsonl`: 향후 추가할 Agent 도구 호출 기록
+- `logs/audit.jsonl`: 모든 Agent Tool 요청의 감사 기록
+
+최근 Tool 요청은 다음 명령으로 확인한다.
+
+```bash
+tail -n 5 logs/audit.jsonl
+```
+
+이 명령은 audit log를 읽기만 한다. 각 record에는 `tool_name`, `status`, 시작·종료 시각, `duration_seconds`, 입력 제공 여부, `timeout_seconds`와 오류 field가 있다. 원문 입력은 민감정보 기록을 줄이기 위해 저장하지 않는다. `success`는 정상 완료, `failed`는 거부나 실행 오류, `timeout`은 제한 시간 초과를 의미한다.
 
 성공한 학습 실행을 기록하려면 프로젝트 root에서 다음 명령을 실행한다.
 
@@ -325,7 +339,7 @@ python src/list_runs.py --limit 3
 
 ## 장애 시나리오
 
-현재는 제어된 학습 실패의 증상, log 확인과 정상 실행을 통한 복구 절차를 문서화했다. 설정 파일이 없거나 조건이 잘못된 경우도 학습 전에 실패로 기록한다. Artifact 저장 실패, 도구 timeout, 허용되지 않은 도구 요청과 과도한 log 증가는 관련 기능을 구현하면서 추가한다.
+현재는 제어된 학습 실패와 Tool timeout의 증상, log 확인 및 정상 실행 복구 절차를 문서화했다. 설정 파일이 없거나 조건이 잘못된 경우도 학습 전에 실패로 기록한다. Artifact 저장 실패, 허용되지 않은 도구 요청과 과도한 log 증가는 이후 보강한다.
 
 현재 구현한 학습 실패 재현과 복구 확인 절차는 [장애 시나리오](docs/failure-scenarios.md), 이전 성공 run의 재실행 절차는 [Runbook](docs/runbook.md)에서 확인할 수 있다.
 
@@ -335,7 +349,7 @@ python src/list_runs.py --limit 3
 - 안전한 예시 설정만 커밋한다.
 - 로그에 민감한 운영 정보가 포함될 수 있다고 가정한다.
 - artifact가 쌓이기 전에 보존 기간과 백업 절차를 정한다.
-- 향후 도구 실행기에는 allowlist에 필요한 최소 권한만 부여한다.
+- Tool runner에는 allowlist에 필요한 최소 권한만 부여하고 audit log에도 원문 입력을 남기지 않는다.
 
 ## 기술 위키와 작업 기록
 

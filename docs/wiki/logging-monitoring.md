@@ -55,6 +55,25 @@ Run log와 audit log는 목적이 다르다.
 
 `python src/run_job.py`로 직접 학습하면 run log만 남는다. `tool_runner.py --tool run_train_job`을 사용하면 학습 run log와 Tool audit log가 모두 남는다.
 
+### Day 14 log schema 변화와 일관성 검수
+
+기능이 단계적으로 추가되면서 `logs/runs.jsonl`에는 서로 다른 시점의 schema가 함께 존재한다.
+
+| 도입 시점 | 추가된 정보 | 현재 record 수 |
+|---|---|---:|
+| Day 4 | run ID, 상태, 시각, duration, metric, artifact | 2 |
+| Day 5 | 오류 종류, 메시지와 traceback | 6 |
+| Day 8 | config와 config 경로 | 3 |
+| Day 9 이후 | experiment 이름과 parameters | 6 |
+
+이 차이는 기존 record가 손상됐다는 뜻이 아니라 기능이 추가되기 전에는 해당 field가 존재하지 않았다는 뜻이다. 과거 기록을 보기 좋게 만들기 위해 임의로 덮어쓰지 않고 원본을 보존하며, `list_runs.py`처럼 조회하는 쪽에서 없는 field를 안전하게 처리한다.
+
+Day 14 검수 시점에는 run log 17건과 audit log 10건이 모두 JSON으로 해석됐다. Success run 12건의 `artifact_path`가 모두 실제 파일과 연결됐고, 현재 Day 9 이후 schema 6건과 audit schema 10건도 필요한 field와 상태 규칙을 통과했다.
+
+실제 `model.pkl`은 16개라 run log가 연결한 12개보다 4개 많았다. 그중 3개는 run logging 도입 전 만들어진 artifact이고, 나머지 1개는 낮은 수준의 학습 진입점을 직접 실행한 결과로 추정된다. 과거 증거일 수 있으므로 자동 삭제하거나 로그를 인위적으로 만들지 않고 보존한다.
+
+Audit log는 Day 13부터 생성됐으므로 그 이전 Tool 요청 기록은 존재하지 않는다. 또한 현재 audit schema에는 내부 학습의 `run_id`가 없어 `run_train_job` audit record와 run record를 직접 결합할 수 없다. 두 흐름을 정확히 추적하려면 이후 공통 `request_id` 또는 `run_id`를 전달해야 한다.
+
 ## 알아둘 명령어나 코드
 
 ```bash
@@ -103,6 +122,10 @@ wc -l logs/runs.jsonl
 - 증상: credential이나 민감한 요청 내용이 운영 로그에 남을 수 있음
 - 확인할 것: audit schema와 기록되는 field
 - 복구 방법: 이 프로젝트처럼 `input_provided`와 최소 오류 정보만 남기고 민감정보를 제외함
+- 실패: 모든 과거 run에 현재 schema를 강제로 요구함
+- 증상: 기능 추가 전의 정상 record를 손상된 로그로 잘못 판단함
+- 확인할 것: record 생성 시점과 당시 지원하던 field, 현재 schema field의 존재 여부
+- 복구 방법: 원본을 임의 수정하지 않고 schema 세대를 구분하며 조회 도구에서 누락 field를 호환 처리함
 
 ## 실용적인 이해
 
@@ -136,6 +159,8 @@ Audit log의 `duration_seconds`는 Tool handler 시간만이 아니라 설정 �
   답변: 맞다. `--fail`은 검증용 발생 장치이고 `try/except`와 failed record 작성은 실제 학습 또는 artifact 저장 exception에도 적용되는 운영 기능이다.
 - 질문: 기존 Tool들에 대한 기록을 남기는 것인가?
   답변: 맞다. `logs/audit.jsonl`은 정상 실행, 미등록 요청, handler 실패와 timeout을 모두 같은 schema로 기록해 Agent의 Tool 사용 이력을 추적한다.
+- 질문: 기능이 추가되면서 기존 로그와 새 로그 사이에 차이가 생긴 것인가?
+  답변: 맞다. 오류, config, experiment 추적 기능이 순서대로 추가되면서 과거 record에는 새 field가 없다. 이는 손상이 아니라 schema evolution이며, 원본을 수정하는 대신 조회 코드가 누락 field를 안전하게 처리한다.
 
 ## 관련 문서
 

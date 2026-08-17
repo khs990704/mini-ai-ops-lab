@@ -8,43 +8,37 @@ Mini AI Ops Lab은 AI 작업을 운영하는 방법을 배우기 위한 작고 �
 
 ## 아키텍처
 
-현재 구현된 학습 운영 흐름은 다음과 같다.
+현재 시스템에는 직접 학습과 Agent Tool 요청이라는 두 진입점이 있다. `run_train_job` handler가 두 흐름을 연결한다.
 
 ```text
-Local Python 또는 Docker container
-               ↓
-       configs/train.yaml
-               ↓
-      src/config_loader.py
-               ↓
-          src/run_job.py
-          ↙             ↘
-src/train_job.py     src/storage.py
-          ↘             ↙
-        logs/runs.jsonl
-        artifacts/{run_id}/model.pkl
-               ↓
-        src/list_runs.py
-       최근 실험 결과 비교
-               ↓
-       src/compare_runs.py
-       원본·재현 run 비교
-
-Agent의 Tool 요청
-               ↓
-       configs/tools.yaml
-               ↓
-  src/tool_config_loader.py
-       검증된 공통 allowlist
-               ↓
-  src/tool_runner.py
-   입력 검증과 별도 process 실행
-          ↓             ↘
-  제한 시간 내 결과     logs/audit.jsonl
-  또는 process 종료      모든 요청 이력
+직접 학습 요청                         Agent Tool 요청
+      │                                      │
+configs/train.yaml                     configs/tools.yaml
+      │                                      │
+src/config_loader.py              src/tool_config_loader.py
+      │                                      │
+      ▼                                      ▼
+src/run_job.py ◀──── run_train_job ─── src/tool_runner.py
+      │                              allowlist·입력·timeout
+      │                                      │
+      ▼                                      ├─ 조회·echo handler
+train_job.py + storage.py                    │
+      │                                      ▼
+      ├─ logs/runs.jsonl              src/audit_logger.py
+      └─ artifacts/{run_id}/model.pkl        │
+                                             ▼
+                                      logs/audit.jsonl
 ```
 
-`src/run_job.py`가 학습과 저장을 조정하고 성공·실패 record를 남긴다. 상세한 구성요소 책임과 실행 sequence는 [Architecture](docs/architecture.md)에서 확인할 수 있다.
+`src/run_job.py`는 학습과 저장을 조정하고, `src/tool_runner.py`는 Agent 요청을 통제한다. `run_train_job` Tool은 기존 `run_job.py` 기능을 재사용하므로 같은 학습 구현을 두 번 만들지 않는다.
+
+| 실행 경로 | 목적 | 생성하거나 변경하는 운영 증거 |
+|---|---|---|
+| `python src/run_job.py` | 학습을 직접 실행 | run log와 model artifact |
+| 조회·`echo` Tool | Agent가 상태 조회 또는 응답 기능 사용 | audit log |
+| `run_train_job` Tool | Agent 요청으로 학습 실행 | audit log, run log와 model artifact |
+
+현재 audit record에는 내부 학습의 `run_id`가 없어 두 log를 공통 ID로 직접 연결하지는 못한다. `run_train_job`이 두 영역을 기능적으로 연결하고, 요청 시각으로 관련 record를 확인하는 수준이다. 상세한 구성요소 책임과 실행 sequence는 [Architecture](docs/architecture.md)에서 확인할 수 있다.
 
 ## 주요 기능
 
@@ -70,6 +64,7 @@ Agent의 Tool 요청
 - 성공·실패 Tool 결과의 공통 JSON 구조
 - Tool별 제한 시간과 별도 process 종료
 - 성공·거부·실패·timeout audit log
+- 학습 run과 Agent Tool 요청을 연결한 통합 운영 흐름
 - 프로젝트 내부 기술 위키와 날짜별 작업 기록
 
 다음 기능은 향후 작업 범위다.
@@ -99,7 +94,7 @@ Docker image는 기존 Python 코드를 Docker 전용으로 다시 작성하는 
 프로젝트 root에서 image를 build한다.
 
 ```bash
-docker build -t mini-ai-ops-lab:day11 .
+docker build -t mini-ai-ops-lab:day13 .
 ```
 
 이 명령은 base image와 dependency를 내려받아 local Docker image와 build cache를 만든다. `Dockerfile`, `requirements.txt`, `src/`, `configs/`를 변경했다면 새 내용을 반영하기 위해 다시 build한다.
@@ -107,7 +102,7 @@ docker build -t mini-ai-ops-lab:day11 .
 동작만 확인하고 실행 결과를 버리려면 다음처럼 실행한다.
 
 ```bash
-docker run --rm mini-ai-ops-lab:day11
+docker run --rm mini-ai-ops-lab:day13
 ```
 
 `--rm`은 실행이 끝난 container를 제거한다. 이 명령의 log와 artifact는 container 안에 있으므로 container와 함께 사라지고, build한 image는 유지된다.
@@ -119,7 +114,7 @@ docker run --rm \
   --user "$(id -u):$(id -g)" \
   --mount type=bind,source="$PWD/logs",target=/app/logs \
   --mount type=bind,source="$PWD/artifacts",target=/app/artifacts \
-  mini-ai-ops-lab:day11
+  mini-ai-ops-lab:day13
 ```
 
 - `--user`는 생성 파일의 소유자를 현재 WSL 사용자와 맞춘다.
@@ -134,7 +129,7 @@ docker run --rm \
   --user "$(id -u):$(id -g)" \
   --mount type=bind,source="$PWD/logs",target=/app/logs \
   --mount type=bind,source="$PWD/artifacts",target=/app/artifacts \
-  mini-ai-ops-lab:day11 \
+  mini-ai-ops-lab:day13 \
   python src/run_job.py --fail
 ```
 
@@ -146,7 +141,7 @@ Container에서 host의 최근 실험 기록을 읽기만 하려면 `logs/`를 r
 docker run --rm \
   --user "$(id -u):$(id -g)" \
   --mount type=bind,source="$PWD/logs",target=/app/logs,readonly \
-  mini-ai-ops-lab:day11 \
+  mini-ai-ops-lab:day13 \
   python src/list_runs.py --experiment iris-baseline --limit 3
 ```
 
@@ -334,6 +329,10 @@ python src/list_runs.py --limit 3
 ```
 
 이 명령은 로그를 변경하지 않고 최근 세 run의 실험 이름, 상태, accuracy, parameter, run ID와 artifact 경로를 비교 가능한 열로 출력한다. 원본 JSON을 확인해야 할 때는 `tail -n 3 logs/runs.jsonl`을 사용한다. JSONL은 한 실행을 독립된 JSON 한 줄로 저장하므로 기존 전체 내용을 다시 쓰지 않고 새 기록을 추가할 수 있다.
+
+프로젝트가 단계적으로 발전했기 때문에 과거 run record는 작성 당시의 field만 가진다. 현재 `runs.jsonl`에는 초기 기본 record, 오류 field 추가, config 추가, experiment·parameter 추가의 네 schema 세대가 함께 보존돼 있다. `list_runs.py`는 과거 record의 없는 값을 `-`로 표시하거나 기존 config에서 보완하며 원본 log를 수정하지 않는다.
+
+Day 14 점검에서는 모든 현재 success run이 실제 artifact를 가리키는지 확인했다. 반대로 run log 도입 전이나 하위 수준 실행으로 만들어진 일부 artifact는 연결된 run record가 없으므로, 참조가 없다는 이유만으로 자동 삭제하지 않는다.
 
 생성된 로그 파일은 Git에서 제외한다. 빈 디렉터리는 `.gitkeep` placeholder를 사용해 저장소에 유지한다.
 

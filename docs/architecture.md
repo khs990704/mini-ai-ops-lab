@@ -6,7 +6,7 @@ Mini AI Ops Lab은 작은 머신러닝 학습 작업을 추적 가능한 운영 
 
 ## 현재 구현 범위
 
-Day 13까지 구현된 범위는 다음과 같다.
+Day 13까지 핵심 기능을 구현하고 Day 14에 전체 연결과 운영 증거를 검수한 범위는 다음과 같다.
 
 - Iris 분류 model 학습과 accuracy 계산
 - 실행별 고유 run ID 생성
@@ -31,68 +31,35 @@ Day 13까지 구현된 범위는 다음과 같다.
 - 성공·실패 Tool 결과의 공통 JSON 구조
 - 별도 process 기반 Tool 실행과 제한 시간 초과 종료
 - 성공·거부·실패·timeout의 `logs/audit.jsonl` 누적
+- 직접 학습과 Agent 학습 요청의 공통 `run_training_job()` 재사용
+- run log·audit log·artifact의 schema와 참조 일관성 검수
 
 Agent 또는 role별 권한, audit log rotation과 중단된 쓰기 작업의 자동 rollback은 이후 작업 범위다.
 
 ## 시스템 구성
 
 ```text
-Local Python 또는 Docker container
-               │
-               ▼
-       configs/train.yaml
-          학습 조건 정의
-               │
-               ▼
-     src/config_loader.py
-       설정 읽기와 검증
-               │
-               ▼
-       src/run_job.py
-       실행 조정과 상태 기록
-          │          │
-          │          └──────────────┐
-          ▼                         ▼
- src/train_job.py             src/storage.py
- 데이터·학습·평가          run ID·model 저장
-          │                         │
-          └──────────┬──────────────┘
-                     ▼
-              실행 결과 분리
-          ┌──────────┴──────────┐
-          ▼                     ▼
- logs/runs.jsonl      artifacts/{run_id}/model.pkl
- 실행 상태와 원인          학습된 실제 결과물
-          │
-          ▼
-  src/list_runs.py
-  최근 run 조회와 비교
-          │
-          ▼
- src/compare_runs.py
- 원본·재현 run 비교
-
-Agent의 Tool 요청
-          │
-          ▼
- configs/tools.yaml
- 공통 Tool allowlist
-          │
-          ▼
-src/tool_config_loader.py
- 구조·권한·resource 검증
-          │
-          ▼
-src/tool_runner.py
- 요청 허용·거부와 시간 제한
-          │
-          ├──────────────┐
-          ▼              ▼
- 별도 handler process  src/audit_logger.py
- 실행 또는 종료       시간·상태 record 생성
-                         │
-                         ▼
-                 logs/audit.jsonl
+직접 학습 요청                            Agent Tool 요청
+      │                                         │
+      ▼                                         ▼
+configs/train.yaml                       configs/tools.yaml
+      │                                         │
+      ▼                                         ▼
+src/config_loader.py                src/tool_config_loader.py
+      │                                         │
+      ▼                                         ▼
+src/run_job.py ◀──── run_train_job ───── src/tool_runner.py
+      │                                 allowlist·입력·timeout
+      │                                         │
+      ▼                            ┌────────────┴────────────┐
+src/train_job.py + src/storage.py  ▼                         ▼
+      │                       조회·echo handler       src/audit_logger.py
+      │                                                 │
+      ├─ logs/runs.jsonl                                ▼
+      └─ artifacts/{run_id}/model.pkl            logs/audit.jsonl
+      │
+      ▼
+src/list_runs.py → src/compare_runs.py
 ```
 
 Local과 Docker는 별도의 구현을 사용하지 않는다. 두 실행환경 모두 학습에는 `src/run_job.py`, Tool 요청에는 `src/tool_runner.py`를 진입점으로 사용한다.
@@ -108,7 +75,7 @@ Local과 Docker는 별도의 구현을 사용하지 않는다. 두 실행환경 
 | `src/compare_runs.py` | 두 success run의 experiment, parameter, metric과 artifact 존재 여부 비교 | 학습 실행, record나 model 수정 |
 | `configs/tools.yaml` | 허용할 Tool, 입력 형태, 영향 수준과 접근 resource 정의 | 실제 요청 검증, Tool 실행 |
 | `src/tool_config_loader.py` | Tool allowlist의 schema, 값과 상대 resource 경로 검증 | Agent 식별, Tool 요청 허용·실행 |
-| `src/tool_runner.py` | Tool 이름·입력 검증, 별도 process의 고정 handler 실행·timeout, 구조화된 결과 반환 | shell 명령 실행, timeout rollback |
+| `src/tool_runner.py` | Tool 이름·입력 검증, 별도 process의 고정 handler 실행·timeout, audit 연결과 구조화된 결과 반환 | shell 명령 실행, timeout rollback |
 | `src/audit_logger.py` | Tool 요청 시각, duration, 상태와 오류를 JSONL에 append | Tool 허용 판단, handler 실행 |
 | `src/train_job.py` | 검증된 설정에 따른 Iris data 분리, `LogisticRegression` 학습, accuracy와 sample 수 계산 | 운영 상태와 traceback 기록 |
 | `src/storage.py` | 고유 run ID 생성, run별 디렉터리 생성, pickle model 저장 | 학습 실행과 log schema 관리 |
@@ -118,7 +85,17 @@ Local과 Docker는 별도의 구현을 사용하지 않는다. 두 실행환경 
 | `Dockerfile` | Python 3.12, dependency, source, 기본 설정과 실행 명령을 image로 정의 | 실행 결과를 영구 보존 |
 | `.dockerignore` | 불필요한 개발 파일, 기존 결과와 secret 가능 파일을 build context에서 제외 | Git ignore 규칙 대체 |
 
-`python src/train_job.py`는 학습과 artifact 저장을 직접 확인하는 하위 수준 진입점이다. 운영 기록까지 필요한 기본 사용 경로는 `python src/run_job.py`다.
+`python src/train_job.py`는 학습과 artifact 저장만 직접 확인하는 하위 수준 진입점이므로 run log를 만들지 않는다. 운영 기록까지 필요한 기본 사용 경로는 `python src/run_job.py`다.
+
+## 통합 운영 흐름
+
+| 진입점 | 실행 통제 | 학습 결과 | Tool 감사 기록 |
+|---|---|---|---|
+| `python src/run_job.py` | 학습 config 검증과 exception 처리 | run log와 model 생성 | 없음 |
+| 조회·`echo` Tool | allowlist, 입력 검증과 timeout | 조회 또는 문자열 결과 | audit log 생성 |
+| `run_train_job` Tool | allowlist, 입력 검증과 timeout 후 `run_training_job()` 호출 | run log와 model 생성 | audit log 생성 |
+
+`run_train_job`은 별도의 학습 구현이 아니라 `src/run_job.py`의 `run_training_job()`을 handler로 호출한다. 따라서 Agent 경로에도 같은 학습 config 검증, model 저장과 run log schema가 적용된다. Tool Runner를 거치지 않는 직접 학습에는 audit record가 없고, 모든 Tool 요청에는 주요 기능의 읽기·쓰기 여부와 별개로 audit record가 추가된다.
 
 ## 성공 실행 흐름
 
@@ -217,16 +194,43 @@ Day 11의 `configs/tools.yaml`은 `echo`, `list_artifacts`, `read_log_summary`, 
 
 | Tool | Handler 동작 | Project 상태 변경 |
 |---|---|---|
-| `echo` | 입력 문자열 반환 | 없음 |
-| `list_artifacts` | `artifacts/*/model.pkl` 목록 조회 | 없음 |
-| `read_log_summary` | 최근 run 5개의 상태와 결과 요약 | 없음 |
-| `run_train_job` | 기본 설정으로 `run_training_job()` 호출 | run log와 model 생성 |
+| `echo` | 입력 문자열 반환 | audit log 추가 |
+| `list_artifacts` | `artifacts/*/model.pkl` 목록 조회 | audit log 추가 |
+| `read_log_summary` | 최근 run 5개의 상태와 결과 요약 | audit log 추가 |
+| `run_train_job` | 기본 설정으로 `run_training_job()` 호출 | audit log, run log와 model 생성 |
 
 성공, 실패와 timeout은 공통으로 `tool_name`, `status`, `result`, `error_type`, `error_message`를 반환한다. `run_train_job`의 `result.training_status`는 Tool handler 실행 결과와 내부 학습 결과를 구분한다.
 
 `tool_runner.py`는 Linux/WSL의 `fork` context로 handler process를 만들고 pipe를 통해 결과를 받는다. `--timeout` 안에 결과가 없으면 먼저 `terminate()`, 필요하면 `kill()`로 process를 정리한다. 요청 전체의 시작·종료 UTC 시각과 단조 시계 기반 duration은 `audit_logger.py`가 JSONL record로 만든다. 원문 입력 대신 `input_provided`만 기록한다.
 
 현재는 Agent identity가 없는 단일 실행환경이므로 모든 요청이 같은 공통 allowlist를 사용한다. 여러 Agent의 역할이 실제로 나뉘면 Agent 또는 role별 최소 권한 목록으로 확장할 수 있다.
+
+## Day 14 로그 일관성 검수
+
+Day 14 시작 시점의 실제 운영 증거를 읽기 전용으로 검사했다.
+
+| 검수 대상 | 결과 |
+|---|---|
+| `logs/runs.jsonl` | 17건 모두 JSON 파싱 성공, success 12건·failed 5건 |
+| Success run → artifact | 12건 모두 실제 model 파일 존재 |
+| `logs/audit.jsonl` | 10건 모두 동일 field, success 6건·failed 2건·timeout 2건 |
+| 시각과 duration | 종료 시각이 시작보다 빠르거나 duration이 음수인 record 없음 |
+| 현재 run schema | `experiment_name`이 있는 6건 모두 field와 상태 규칙 일치 |
+
+Run log는 기존 record를 수정하지 않고 기능이 추가된 시점의 schema를 보존해 네 세대가 함께 존재한다.
+
+| Schema 세대 | Record 수 | 추가된 주요 정보 |
+|---|---:|---|
+| 초기 run | 2 | 상태, 시각, duration, metric, artifact |
+| 실패 추적 | 6 | 오류 종류, 메시지와 traceback |
+| Config 추적 | 3 | config 경로와 실제 값 |
+| Experiment 추적 | 6 | experiment 이름과 비교용 parameters |
+
+초기 record에 최신 field가 없는 것은 손상이 아니라 schema evolution의 결과다. `list_runs.py`가 없는 값을 호환 표시하고 원본은 그대로 보존한다.
+
+실제 model 16개 중 4개는 run log가 참조하지 않는다. 세 개는 run log 도입 전 생성됐고 나머지 한 개는 기록상 하위 수준 실행 결과로 추정된다. 반대로 success run이 가리키는 artifact 누락은 없었다. 참조가 없는 artifact도 생성 배경을 확인하기 전에는 자동 삭제하지 않는다.
+
+Audit log는 Day 13 이후 Tool 요청만 포함한다. 현재 audit schema에는 `run_id`나 공통 `request_id`가 없어 성공한 `run_train_job` audit record와 내부 run record를 key로 직접 연결하지 못하며, 요청 시각으로만 관련 실행을 추정한다.
 
 ## 실행환경 경계
 
@@ -279,8 +283,11 @@ Docker image는 Python 3.12, dependency, `src/`, `configs/`와 기본 명령을 
 - 별도 process 실행은 현재 WSL/Linux와 Docker의 `fork` 실행환경을 기준으로 한다.
 - Audit log는 원문 입력과 handler 결과 전체를 저장하지 않으며, 별도 rotation이나 동시 쓰기 제어가 없다.
 - Tool 기능이 완료된 뒤 audit log 쓰기가 실패하면 기능의 상태 변경은 이미 발생했을 수 있다.
+- Run log에는 네 schema 세대가 공존하며 과거 record를 현재 schema로 migration하지 않았다.
+- 일부 초기·하위 수준 artifact는 연결된 run log가 없다.
+- Audit record에는 내부 학습의 `run_id`가 없어 Agent 요청과 run을 공통 ID로 직접 연결하지 못한다.
 
-이 제약은 현재 학습용 단일 job 범위를 명확히 하기 위한 것이다. 동시성, 장기 보존을 위한 설정 원본 관리, backup과 Agent 실행 통제는 이후 작업에서 단계적으로 추가한다.
+이 제약은 현재 학습용 단일 job 범위를 명확히 하기 위한 것이다. 동시성, 장기 보존을 위한 설정 원본 관리, backup, 공통 request ID와 Agent별 실행 통제는 이후 작업에서 단계적으로 추가한다.
 
 ## 다음 확장 방향
 
@@ -298,6 +305,8 @@ configs/tools.yaml
 allowlist 기반 Agent tool runner
        ↓
 timeout과 logs/audit.jsonl
+       ↓
+통합 architecture와 log 일관성 검수
        ↓
 운영 문서, 보안과 backup 점검
 ```

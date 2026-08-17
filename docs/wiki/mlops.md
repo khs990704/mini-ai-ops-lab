@@ -15,9 +15,14 @@ Mini AI Ops Lab은 단순한 학습 스크립트를 운영 가능한 작업으�
 - `src/config_loader.py`
 - `src/list_runs.py`
 - `src/compare_runs.py`
+- `src/tool_config_loader.py`
+- `src/tool_runner.py`
+- `src/audit_logger.py`
 - `src/storage.py`
 - `configs/train.yaml`
+- `configs/tools.yaml`
 - `logs/runs.jsonl`
+- `logs/audit.jsonl`
 - `artifacts/`
 - `docs/architecture.md`
 - `docs/runbook.md`
@@ -26,9 +31,9 @@ Mini AI Ops Lab은 단순한 학습 스크립트를 운영 가능한 작업으�
 
 | 디렉터리 | 역할 | 현재 또는 예정 내용 |
 |---|---|---|
-| `configs/` | 코드 수정 없이 실행 방식을 바꾸는 설정 보관 | 현재 `train.yaml`; 향후 `tools.yaml` |
-| `src/` | 프로젝트의 실제 동작을 구현하는 소스 코드 보관 | 현재 학습·저장·조회 script; 향후 `tool_runner.py` |
-| `logs/` | 실행 과정, 성공·실패 상태, Agent 도구 호출 기록 | 현재 `runs.jsonl`; 향후 `errors.jsonl`, `audit.jsonl` |
+| `configs/` | 코드 수정 없이 실행 방식을 바꾸는 설정 보관 | 학습용 `train.yaml`, Tool 허용 정책용 `tools.yaml` |
+| `src/` | 프로젝트의 실제 동작을 구현하는 소스 코드 보관 | 학습·저장·조회와 Tool 실행·감사 기록 script |
+| `logs/` | 실행 과정, 성공·실패 상태, Agent Tool 요청 기록 | 현재 `runs.jsonl`, `audit.jsonl`; 향후 `errors.jsonl` |
 | `artifacts/` | 학습 실행이 만든 결과물 보관 | 현재 실행별 `model.pkl`; 향후 설정 사본과 추가 결과 파일 |
 
 현재 흐름은 다음과 같이 이해할 수 있다.
@@ -180,6 +185,28 @@ experiment, parameters, metrics와 artifact 비교
 
 같은 config는 재현에 필요하지만 항상 충분하지는 않다. Data, code commit, dependency, Docker image digest, hardware와 비결정적 연산도 결과에 영향을 줄 수 있다. 현재 run record는 이 환경 정보를 모두 저장하지 않으므로 이번 검증은 남아 있던 같은 Day 9 image와 같은 설정에서 metric이 반복됐다는 증거다.
 
+### Day 14 MLOps와 Agent 실행 흐름 통합
+
+Day 14에서는 학습 흐름과 Agent Tool 흐름이 별개의 프로그램이 아니라 같은 학습 기능을 서로 다른 진입점에서 사용하는 구조임을 정리했다.
+
+```text
+사용자 직접 실행 ── run_job.py ─────────────┐
+                                            ├── 학습 → run log → model artifact
+Agent Tool 요청 ── tool_runner.py           │
+                       └── run_train_job ───┘
+                       └── 모든 요청 → audit log
+```
+
+| 실행 방법 | 남는 운영 증거 |
+|---|---|
+| `python src/run_job.py --config configs/train.yaml` | run log와 model artifact |
+| `python src/tool_runner.py --tool echo --input "hello"` | Tool audit log |
+| `python src/tool_runner.py --tool run_train_job` | Tool audit log, run log와 model artifact |
+
+`run_train_job`은 별도의 학습 구현을 복제하지 않고 `run_job.py`의 운영 함수를 호출한다. 따라서 직접 실행과 Agent 요청이 같은 설정 검증, 실패 처리, run log와 artifact 저장 규칙을 공유한다.
+
+현재 두 log에는 공통 `request_id` 또는 audit record의 `run_id`가 없다. `run_train_job`이 두 log를 모두 남긴다는 기능 연결은 확인할 수 있지만, 특정 audit record와 특정 run record의 관계는 가까운 실행 시각으로 추정해야 한다. 운영 추적성을 높이려면 이후 공통 상관관계 ID가 필요하다.
+
 ## 알아둘 명령어나 코드
 
 ```bash
@@ -256,6 +283,8 @@ Experiment tracking은 단순히 실행 횟수를 세는 기능이 아니다. �
   답변: 현재의 결정적인 Iris 학습에서는 같은 결과를 기대하지만 일반적으로는 data, code, dependency, hardware와 비결정적 연산도 영향을 준다. 같은 config는 필요하지만 완전 재현의 충분조건은 아니다.
 - 질문: `compare_runs.py`가 실제 MLOps에서도 필요한가?
   답변: 이 파일 자체는 표준 필수 파일이 아니다. 다만 run의 parameter, metric과 artifact를 비교하는 기능은 MLOps의 핵심이며 실제 환경에서는 MLflow 같은 platform이 대신할 수 있다.
+- 질문: Day 14는 전반적으로 지금까지 만든 기능을 검수하는 날인가?
+  답변: 맞다. 새 핵심 기능을 늘리기보다 학습, model 저장, run log, Agent Tool, timeout과 audit log가 하나의 운영 흐름으로 연결되는지 확인하고 README와 architecture를 현재 상태에 맞게 정리하는 날이다.
 
 ## 관련 문서
 

@@ -74,6 +74,28 @@ Day 14 검수 시점에는 run log 17건과 audit log 10건이 모두 JSON으로
 
 Audit log는 Day 13부터 생성됐으므로 그 이전 Tool 요청 기록은 존재하지 않는다. 또한 현재 audit schema에는 내부 학습의 `run_id`가 없어 `run_train_job` audit record와 run record를 직접 결합할 수 없다. 두 흐름을 정확히 추적하려면 이후 공통 `request_id` 또는 `run_id`를 전달해야 한다.
 
+### Day 15 장애 시나리오와 제어된 실패 검증
+
+장애 시나리오는 오류 메시지를 새로 만드는 기능이 아니다. 이미 구현된 실패 처리 경로가 실제로 상태, 오류와 일부 결과를 기록하는지 안전하게 재현하고, 운영자가 확인·복구할 순서를 문서화한 것이다.
+
+| 장애 | 기록 위치 | 대표 상태와 오류 |
+|---|---|---|
+| 학습 작업 실패 | `logs/runs.jsonl` | `failed`, `RuntimeError` 또는 학습 exception |
+| Model artifact 저장 실패 | `logs/runs.jsonl` | `failed`, `OSError` 등 저장 exception |
+| Config load 실패 | `logs/runs.jsonl` | `failed`, `FileNotFoundError` 또는 `ValueError` |
+| Tool timeout | `logs/audit.jsonl` | `timeout`, `ToolTimeoutError` |
+| 미허용 Tool 요청 | `logs/audit.jsonl` | `failed`, `ToolNotAllowedError` |
+
+제어된 실패는 실제 disk 고갈이나 권한 손상을 만들지 않고 같은 exception 처리 경로를 반복 확인하는 방법이다. `--fail`은 `RuntimeError`를 발생시키고, artifact 검증은 현재 Python process 안에서 `save_model()`이 `OSError`를 내도록 임시 교체했다. 후자는 source code와 실제 filesystem 권한을 바꾸지 않는다.
+
+Artifact 검증 명령의 exit code `0`은 학습 성공이 아니라 검사 조건인 `failed`와 `OSError`가 예상대로 기록됐다는 뜻이다. 운영 상태를 판단할 때는 검증 프로그램의 exit code와 내부 run record의 `status`를 구분해야 한다.
+
+복구는 기존 failed record를 success로 고치는 작업이 아니다. 오류와 일부 결과를 확인하고 원인을 제거한 뒤 새 요청을 실행해 새 success record와 artifact를 만든다. 이전 실패 기록은 장애 증거로 보존한다.
+
+이 다섯 유형은 단순한 학습용 가상 상황이 아니라 실제 MLOps 운영에서도 발생할 수 있다. Data·학습 오류, disk 공간·권한 문제, 잘못된 config, 느리거나 멈춘 작업과 정책 밖 Tool 요청을 작은 project 범위에서 다룬 것이다. 안전한 failure injection은 실제 원인을 그대로 만드는 대신 동일한 application exception 처리 경로와 운영 절차를 확인한다.
+
+다만 application이 잡을 수 있는 exception을 검증했다고 모든 실환경 장애가 해결되는 것은 아니다. OS의 강제 종료, log write 실패, network storage, 동시 실행과 부분 파일은 별도의 관찰·정리 대책이 필요하다. 따라서 장애 시나리오는 테스트 증거이면서 현재 운영 대응의 출발점이며, 실행환경이 커질 때 계속 확장해야 한다.
+
 ## 알아둘 명령어나 코드
 
 ```bash
@@ -161,6 +183,12 @@ Audit log의 `duration_seconds`는 Tool handler 시간만이 아니라 설정 �
   답변: 맞다. `logs/audit.jsonl`은 정상 실행, 미등록 요청, handler 실패와 timeout을 모두 같은 schema로 기록해 Agent의 Tool 사용 이력을 추적한다.
 - 질문: 기능이 추가되면서 기존 로그와 새 로그 사이에 차이가 생긴 것인가?
   답변: 맞다. 오류, config, experiment 추적 기능이 순서대로 추가되면서 과거 record에는 새 field가 없다. 이는 손상이 아니라 schema evolution이며, 원본을 수정하는 대신 조회 코드가 누락 field를 안전하게 처리한다.
+- 질문: 실패 시나리오를 만들어 실제 실패의 오류 메시지를 확인할 수 있게 하는 작업인가?
+  답변: 맞다. 다만 오류 처리 기능을 새로 만드는 것이 아니라 이미 구현된 실패 경로를 안전하게 재현해 terminal, run log 또는 audit log에서 무엇을 확인하고 어떻게 복구할지를 운영 문서로 만드는 작업이다.
+- 질문: 이 장애들은 실무에서도 발생하기 때문에 추가한 것인가?
+  답변: 맞다. 학습 오류, artifact 저장 실패, config 오류, timeout과 정책 밖 Tool 요청은 실제 운영에서도 발생한다. Project에서는 실제 환경을 손상시키지 않도록 원인만 제어된 방식으로 재현했다.
+- 질문: 테스트용 시나리오일 뿐인가, 실제 MLOps 작업의 장애에 대비한 것인가?
+  답변: 둘 다다. 개발 중에는 실패 처리와 log를 검증하는 테스트이고, 운영 중에는 확인할 증거와 복구 순서를 제공하는 대응서다. 다만 제어된 exception 검증만으로 OS 강제 종료, log write 실패와 부분 파일까지 완전히 보장하지는 않는다.
 
 ## 관련 문서
 

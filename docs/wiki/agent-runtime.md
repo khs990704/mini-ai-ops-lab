@@ -110,6 +110,12 @@ Tool handler를 같은 process에서 직접 호출하면 실행이 끝나지 않
 
 Timeout의 목적은 끝나지 않거나 지나치게 느린 Tool이 Agent 응답, CPU와 memory를 계속 점유하지 못하게 실행 시간의 상한을 두는 것이다. 그러나 process 종료는 transaction rollback이 아니다. 쓰기 Tool이 이미 log, artifact 또는 외부 상태를 만들었다면 일부 결과가 남을 수 있으므로 timeout 뒤에 관련 상태를 확인해야 한다.
 
+### Day 15 미허용 Tool 요청 대응
+
+`python src/tool_runner.py --tool forbidden_command`처럼 Allowlist에 없는 이름을 요청하면 Tool Runner는 handler process를 시작하기 전에 `ToolNotAllowedError`로 거부한다. 임의 shell 명령, run log와 model artifact는 생성되지 않지만 거부 시도 자체는 `logs/audit.jsonl`에 `status: failed`로 남는다.
+
+복구는 미등록 이름을 무조건 허용 목록에 추가하는 일이 아니다. 먼저 단순 오타인지 확인하고 기존의 허용된 Tool로 요청을 고친다. 새 기능이 실제로 필요할 때만 입력, resource와 영향 범위를 검토한 뒤 `configs/tools.yaml` 정의와 `TOOL_HANDLERS`의 고정 Python handler를 함께 구현한다. YAML에 이름만 추가해도 임의 명령이 실행되지 않는 이중 확인 구조는 유지한다.
+
 ## 흔한 실패 사례
 
 - 실패: 허용되지 않은 도구 요청

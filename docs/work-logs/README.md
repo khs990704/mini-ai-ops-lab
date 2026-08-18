@@ -16,8 +16,8 @@ YYYY-MM-DD-DayN.md
 
 ## 현재 상태
 
-- 완료한 작업일: Day 15
-- 다음 작업: Day 16 - Runbook
+- 완료한 작업일: Day 16
+- 다음 작업: Day 17 - Security And Backup Checklist
 - 우선순위: 프로젝트 구현과 기술 학습 기록 만들기
 
 ## 작업 기록
@@ -37,3 +37,4 @@ YYYY-MM-DD-DayN.md
 - [Day 13 - 2026-08-16](2026-08-16-Day13.md)
 - [Day 14 - 2026-08-17](2026-08-17-Day14.md)
 - [Day 15 - 2026-08-18](2026-08-18-Day15.md)
+- [Day 16 - 2026-08-19](2026-08-19-Day16.md)

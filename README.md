@@ -350,6 +350,8 @@ Day 14 점검에서는 모든 현재 success run이 실제 artifact를 가리키
 - artifact가 쌓이기 전에 보존 기간과 백업 절차를 정한다.
 - Tool runner에는 allowlist에 필요한 최소 권한만 부여하고 audit log에도 원문 입력을 남기지 않는다.
 
+현재 backup 대상, 보존 기준, 복원 검증과 Secret 노출 대응은 [보안·백업 체크리스트](docs/security-backup-checklist.md)에서 확인한다. Backup 자동화와 외부 저장소 연결은 아직 구현하지 않았다.
+
 ## 기술 위키와 작업 기록
 
 프로젝트에 필요한 개념은 [기술 위키](docs/wiki/README.md)에 정리한다. 날짜별 구현 기록은 [작업 일지 인덱스](docs/work-logs/README.md)에서 확인할 수 있다. 전체 방향은 [프로젝트 계획](docs/project-plan.md), 일별 진행 방식은 [일별 작업 흐름](docs/daily-codex-workflow.md)을 참고한다.

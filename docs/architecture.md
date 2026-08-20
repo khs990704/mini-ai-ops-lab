@@ -276,7 +276,7 @@ Docker image는 Python 3.12, dependency, `src/`, `configs/`와 기본 명령을 
 - Artifact 저장 중간에 오류가 나면 일부 run 디렉터리가 남을 수 있다.
 - `requirements.txt`는 호환 version 범위이므로 미래 image rebuild의 package 조합까지 완전히 고정하지 않는다.
 - Pickle은 신뢰하는 프로젝트 artifact만 사용하며 가능한 한 생성한 실행환경에서 불러온다.
-- 현재 log와 artifact는 Git에서 제외되며 별도의 backup·retention 정책은 아직 없다.
+- 현재 log와 artifact는 Git에서 제외되며 수동 backup·restore와 초기 retention 기준은 [보안·백업 체크리스트](security-backup-checklist.md)에 정의한다. 자동 schedule과 외부 backup 저장소는 아직 없다.
 - Tool allowlist는 현재 모든 요청에 공통이며 Agent별 role과 identity를 구분하지 않는다.
 - Tool runner는 allowlist, 입력과 고정 handler 연결을 강제하지만 `access`와 `resources`를 OS 파일 권한으로 직접 적용하지는 않는다.
 - Timeout은 child process를 종료하지만 이미 생성된 log, artifact나 외부 상태를 자동으로 rollback하지 않는다.
@@ -287,7 +287,7 @@ Docker image는 Python 3.12, dependency, `src/`, `configs/`와 기본 명령을 
 - 일부 초기·하위 수준 artifact는 연결된 run log가 없다.
 - Audit record에는 내부 학습의 `run_id`가 없어 Agent 요청과 run을 공통 ID로 직접 연결하지 못한다.
 
-이 제약은 현재 학습용 단일 job 범위를 명확히 하기 위한 것이다. 동시성, 장기 보존을 위한 설정 원본 관리, backup, 공통 request ID와 Agent별 실행 통제는 이후 작업에서 단계적으로 추가한다.
+이 제약은 현재 학습용 단일 job 범위를 명확히 하기 위한 것이다. 동시성, 자동 backup, 장기 보존을 위한 설정 원본 관리, 공통 request ID와 Agent별 실행 통제는 이후 작업에서 단계적으로 추가한다.
 
 ## 다음 확장 방향
 
@@ -318,5 +318,6 @@ timeout과 logs/audit.jsonl
 - [일별 작업 흐름](daily-codex-workflow.md)
 - [장애 시나리오](failure-scenarios.md)
 - [Runbook](runbook.md)
+- [보안·백업 체크리스트](security-backup-checklist.md)
 - [기술 위키](wiki/README.md)
 - [작업 일지](work-logs/README.md)

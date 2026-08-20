@@ -574,12 +574,13 @@ Angle bracket 부분을 실제 ID로 교체해야 하며 이 명령은 해당 co
 
 `docker ps -a`에는 다른 project나 개발환경의 container도 함께 표시된다. 종료 상태이거나 오래됐다는 이유만으로 일괄 삭제하지 않고, 이 project에서 만든 container인지와 보존할 volume·결과가 없는지를 먼저 확인한다. Day 16 점검에서는 Mini AI Ops Lab의 종료 container가 남아 있지 않았으므로 삭제를 수행하지 않았다.
 
-Log rotation, artifact backup과 삭제 기준은 Day 17의 보안·백업 정책에서 구체화한다. 그 전에는 현재 log와 model을 project 운영 증거로 보존한다.
+Log rotation, artifact backup, 복원 검증과 Secret 노출 대응 기준은 [보안·백업 체크리스트](security-backup-checklist.md)를 따른다. 현재 backup은 수동 절차이므로 원본을 정리하기 전에 별도 경로 복원과 검증을 먼저 완료한다.
 
 ## 관련 문서
 
 - [프로젝트 README](../README.md)
 - [Architecture](architecture.md)
 - [장애 시나리오](failure-scenarios.md)
+- [보안·백업 체크리스트](security-backup-checklist.md)
 - [MLOps 위키](wiki/mlops.md)
 - [작업 일지](work-logs/README.md)

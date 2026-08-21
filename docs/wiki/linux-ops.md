@@ -62,6 +62,35 @@ tail -n 5 logs/runs.jsonl
 du -sh logs artifacts
 ```
 
+### `rg`로 source와 문서 검색
+
+`rg`는 ripgrep package가 제공하는 빠른 text 검색 명령이다. Python project dependency가 아니라 WSL에서 source와 문서를 점검할 때 사용하는 개발·운영 도구다.
+
+```bash
+rg -n '^## ' README.md
+rg -n 'run_id' src
+rg --files
+```
+
+- 첫 명령은 README에서 `## `로 시작하는 section과 줄 번호를 출력한다.
+- 두 번째 명령은 `src/` 아래에서 `run_id`가 사용된 위치를 찾는다.
+- 세 번째 명령은 현재 경로 아래의 검색 대상 파일을 나열한다.
+- 모두 파일을 읽기만 하며 project 상태를 변경하지 않는다.
+
+ripgrep은 하위 directory를 빠르게 검색하고 기본적으로 `.gitignore` 규칙을 존중한다. 설치되지 않은 WSL Ubuntu에서는 다음처럼 준비한다.
+
+```bash
+sudo apt update
+sudo apt install ripgrep
+rg --version
+```
+
+`apt update`와 `apt install`은 project가 아니라 WSL system package 상태를 변경한다. 이 project 실행에는 ripgrep이 필수가 아니므로 설치할 수 없다면 기본 `grep`으로 같은 README heading을 확인할 수 있다.
+
+```bash
+grep -n '^## ' README.md
+```
+
 Python에서 로그 파일의 부모 디렉터리를 준비하는 코드는 다음과 같다.
 
 ```python
@@ -80,6 +109,10 @@ log_path.parent.mkdir(parents=True, exist_ok=True)
 - 증상: Exit code는 `0`이지만 검증 결과나 출력이 없음
 - 확인할 것: 파일에 `main()` 진입점이 있는지, 실제 loader 함수를 호출했는지
 - 복구 방법: Runbook의 함수 호출 명령을 사용하거나 해당 module을 사용하는 운영 진입점을 실행함
+- 실패: `rg: command not found`
+- 증상: README heading이나 source 검색 명령을 실행할 수 없음
+- 확인할 것: `rg --version`과 WSL package 설치 여부
+- 복구 방법: `sudo apt install ripgrep`으로 설치하거나 같은 검색을 `grep -n`으로 수행함
 
 ## 실용적인 이해
 
@@ -97,6 +130,8 @@ log_path.parent.mkdir(parents=True, exist_ok=True)
   답변: 장애 대응도 포함하지만 더 넓게는 환경 준비, 정상 실행, 결과 확인, 재현, 복구와 정리를 하나의 운영 순서로 연결하는 날이다. Day 15 장애 문서는 원인 중심이고 Runbook은 실제 실행 순서 중심이다.
 - 질문: 오늘은 기존 기능과 내용을 목적에 맞게 정리한 문서 작업인가?
   답변: 맞다. 실행 source와 설정은 변경하지 않고 기존 기능을 운영자가 문서 하나로 사용할 수 있게 정리했다. 다만 문서 명령이 실제로 맞는지 확인하기 위해 정상 학습, Tool, Docker와 재현 비교를 실행했다.
+- 질문: `rg`는 어떤 package이며 왜 `sudo apt install ripgrep`이 필요한가?
+  답변: `rg`는 ripgrep package의 실행 명령이다. Source와 문서를 빠르게 검색하고 기본적으로 `.gitignore`를 존중한다. Project 실행 dependency는 아니며 WSL system에 없을 때만 ripgrep을 설치하면 된다. 설치하지 않아도 간단한 검색은 `grep`으로 대체할 수 있다.
 
 ## 관련 문서
 
